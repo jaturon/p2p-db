@@ -23,7 +23,9 @@ async function open(name) {
   // durability:'relaxed' — batches writes before flushing to IDB.
   //   Trades a tiny loss window (uncommitted batch on sudden crash) for speed.
   // durability:'strict'  — flushes on every SQLite commit; fully safe, slower.
-  const vfs = await IDBBatchAtomicVFS.create(name, module, { durability: 'relaxed' })
+  // wa-sqlite ≥1.0 dropped the static create() factory; plain constructor,
+  // no module arg (Web Locks replaced the SharedArrayBuffer/Atomics bridge).
+  const vfs = new IDBBatchAtomicVFS(name, { durability: 'relaxed' })
   sqlite3.vfs_register(vfs, true)
 
   db = await sqlite3.open_v2(name)
