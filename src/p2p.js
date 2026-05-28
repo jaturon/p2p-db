@@ -16,7 +16,7 @@ import { identify } from '@libp2p/identify'
 import { multiaddr } from '@multiformats/multiaddr'
 
 // Allow all WebSocket addresses (ws:// and wss://) including LAN
-const wsAll = () => true
+const wsAll = addrs => addrs
 
 // Gateway API candidates — mirrors browser-client/main.js auto-discovery logic.
 // The libp2p_test Node.js gateway runs on port 4010 (API) / 4012 (WS).
