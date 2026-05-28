@@ -8,6 +8,8 @@ import { createP2PDB, DBIndex, IDBStorage, DB_WORKER_URL } from '../src/index.js
 // ─────────────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id)
 
+let activeFilter = null
+
 function log(msg, type = 'info') {
   const el = document.createElement('div')
   el.className = `log-line ${type}`
@@ -238,8 +240,6 @@ async function deleteNote(key) {
 //
 // All of these are synchronous and never block the event loop.
 // ─────────────────────────────────────────────────────────────────────────────
-let activeFilter = null
-
 $('filter-btn').addEventListener('click', () => {
   activeFilter = $('tag-select').value
   log(`filtering by tag: ${activeFilter}`)
