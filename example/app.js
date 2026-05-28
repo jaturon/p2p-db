@@ -10,10 +10,11 @@ const $ = id => document.getElementById(id)
 
 let activeFilter = null
 
-// Peer IDs of the known bootstrap/relay nodes — used to label them in the sidebar
-const RELAY_PEER_IDS = new Set(
-  BOOTSTRAP_LIST.map(addr => addr.split('/p2p/')[1]).filter(Boolean)
-)
+// Fetch gateway peer ID for sidebar labelling (fire-and-forget; filled in async)
+const RELAY_PEER_IDS = new Set()
+fetch(`http://${location.hostname}:4010/api/info`, { signal: AbortSignal.timeout(2000) })
+  .then(r => r.json()).then(info => { if (info.peer_id) RELAY_PEER_IDS.add(info.peer_id) })
+  .catch(() => {})
 
 function log(msg, type = 'info') {
   const el = document.createElement('div')
@@ -157,7 +158,10 @@ node.on('peer:disconnect', peerId => {
 node.on('self:update', updateRelayAddr)
 
 function updateRelayAddr() {
+  const all = node.multiaddrs
   const relays = node.relayMultiaddrs
+  console.debug('[relay] all multiaddrs:', all)
+  console.debug('[relay] circuit addrs:', relays)
   const el = $('relay-addr')
   if (relays.length) {
     el.textContent = relays[0]
@@ -167,6 +171,9 @@ function updateRelayAddr() {
     el.title = ''
   }
 }
+
+// Poll every 3 s as a fallback in case self:peer:update doesn't fire
+setInterval(updateRelayAddr, 3000)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 5 — db change events

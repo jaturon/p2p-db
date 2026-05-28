@@ -1,36 +1,47 @@
 // P2P node using libp2p v2 with:
-//   - WebSockets + WebRTC transports
-//   - Circuit relay v2 for NAT traversal (discovers relays from bootstrap list)
+//   - WebSockets transport
+//   - Circuit relay v2 (local libp2p_test gateway as relay server)
 //   - GossipSub pub/sub for topic-based messaging
-//   - Bootstrap + pubsub peer discovery
+//   - pubsub peer discovery
 
 import { createLibp2p } from 'libp2p'
 import { webSockets } from '@libp2p/websockets'
 import { webRTC } from '@libp2p/webrtc'
 import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
-import { bootstrap } from '@libp2p/bootstrap'
 import { pubsubPeerDiscovery } from '@libp2p/pubsub-peer-discovery'
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { identify } from '@libp2p/identify'
+import { multiaddr } from '@multiformats/multiaddr'
 
-// @libp2p/websockets removed the filters sub-path in v10; inline the equivalent
-const wsAll = addrs => addrs.filter(ma => {
-  const p = ma.protoNames()
-  return p.includes('ws') || p.includes('wss')
-})
+// Allow all WebSocket addresses (ws:// and wss://) including LAN
+const wsAll = () => true
 
-// Public Protocol Labs bootstrap + relay nodes (support circuit relay v2).
-// Using concrete /dns/.../tcp/443/wss/... addresses instead of /dnsaddr/
-// because the local DNS resolver filters TXT records for libp2p.io, which
-// breaks the dnsaddr multi-step walk the browser would otherwise perform.
-export const BOOTSTRAP_LIST = [
-  '/dns/sv15.bootstrap.libp2p.io/tcp/443/wss/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN',
-  '/dns/ny5.bootstrap.libp2p.io/tcp/443/wss/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa',
-  '/dns/sg1.bootstrap.libp2p.io/tcp/443/wss/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt',
-  '/dns/am6.bootstrap.libp2p.io/tcp/443/wss/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb',
+// Gateway API candidates — mirrors browser-client/main.js auto-discovery logic.
+// The libp2p_test Node.js gateway runs on port 4010 (API) / 4012 (WS).
+const GATEWAY_API_CANDIDATES = [
+  `${typeof window !== 'undefined' ? window.location.protocol : 'http:'}//${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:4010/api/info`,
+  'http://localhost:4010/api/info',
 ]
+
+export const BOOTSTRAP_LIST = [] // not used when local gateway is available
+
+async function discoverGateway() {
+  for (const url of GATEWAY_API_CANDIDATES) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(2000) })
+      if (!res.ok) continue
+      const info = await res.json()
+      const addrs = info.addrs ?? []
+      // Prefer LAN WS address so it works from other machines on the same network
+      const ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
+               ?? addrs.find(a => a.includes('/ws'))
+      if (ws) return { addr: ws, peerId: info.peer_id }
+    } catch { /* try next */ }
+  }
+  return null
+}
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -53,31 +64,54 @@ export class P2PNode {
   static async create(opts = {}) {
     const {
       topic = 'p2p-db',
-      bootstrapList = BOOTSTRAP_LIST,
       onMessage,
     } = opts
+
+    // Auto-discover the local libp2p_test gateway before creating the node
+    const gateway = await discoverGateway()
 
     const node = await createLibp2p({
       transports: [
         webSockets({ filter: wsAll }),
         webRTC(),
-        // Circuit relay enables connections through relay nodes for peers behind NAT
-        circuitRelayTransport({ discoverRelays: 2 }),
+        circuitRelayTransport({ discoverRelays: 1 }),
       ],
       connectionEncrypters: [noise()],
       streamMuxers: [yamux()],
+      // Allow dialing private/LAN addresses (gateway is on LAN)
+      connectionGater: { denyDialMultiaddr: async () => false },
       peerDiscovery: [
-        bootstrap({ list: bootstrapList }),
-        // Announces self on _peer-discovery._p2p._pubsub and discovers others
         pubsubPeerDiscovery({ interval: 10_000 }),
       ],
       services: {
         identify: identify(),
-        pubsub: gossipsub({ allowPublishToZeroTopicPeers: true, emitSelf: false }),
+        pubsub: gossipsub({
+          allowPublishToZeroTopicPeers: true,
+          emitSelf: false,
+          scoreThresholds: {
+            gossipThreshold: -Infinity,
+            publishThreshold: -Infinity,
+            graylistThreshold: -Infinity,
+            acceptPXThreshold: 0,
+            opportunisticGraftThreshold: 1,
+          },
+        }),
       },
     })
 
     await node.start()
+
+    // Dial the gateway directly — mirrors browser-client/main.js
+    if (gateway) {
+      try {
+        await node.dial(multiaddr(gateway.addr))
+        console.log('[p2p] connected to gateway:', gateway.addr)
+      } catch (err) {
+        console.warn('[p2p] gateway dial failed:', err.message)
+      }
+    } else {
+      console.warn('[p2p] no local gateway found at port 4010')
+    }
 
     const p2p = new P2PNode(node, topic)
 
@@ -102,9 +136,12 @@ export class P2PNode {
 
     // Fires when the node's multiaddrs change — e.g. when a circuit relay
     // reservation is obtained and a /p2p-circuit/ address becomes available.
-    node.addEventListener('self:peer:update', () => {
-      p2p._dispatch('self:update')
-    })
+    for (const evtName of ['self:peer:update', 'peer:update', 'peer:identify:push', 'transport:listening']) {
+      node.addEventListener(evtName, () => {
+        console.debug('[p2p] event:', evtName, 'multiaddrs:', node.getMultiaddrs().map(a => a.toString()))
+        p2p._dispatch('self:update')
+      })
+    }
 
     return p2p
   }
