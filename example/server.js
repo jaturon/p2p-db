@@ -61,11 +61,6 @@ const server = http.createServer((req, res) => {
 
     res.writeHead(200, {
       'Content-Type': mime,
-      // Required for SharedArrayBuffer / Atomics in the Worker (IDB mode)
-      'Cross-Origin-Opener-Policy':   'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
-      // Allow CDN resources (esm.sh) to load under COEP
-      'Cross-Origin-Resource-Policy': 'cross-origin',
     })
     res.end(data)
   })
@@ -87,8 +82,6 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`  lan     http://${ip}:${PORT}/example/`)
   }
   console.log(``)
-  console.log(`  COOP + COEP headers: on`)
-  console.log(`  IDB mode (SharedArrayBuffer): localhost only`)
-  console.log(`  LAN HTTP peers: memory + localStorage mode (no HTTPS)`)
+  console.log(`  IDB mode (Web Locks): available on all origins`)
   console.log(`  Ctrl-C to stop`)
 })
