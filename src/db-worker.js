@@ -32,12 +32,13 @@ async function open(name) {
 
   // WAL mode: readers never block writers; pages accumulate in the WAL file
   // and are checkpointed into the main IDB store on close or when WAL grows large.
+  // IDBBatchAtomicVFS uses SQLITE_IOCAP_BATCH_ATOMIC for durability — WAL mode
+  // is incompatible with batch atomic writes and must not be set here.
   await sqlite3.exec(db, `
     CREATE TABLE IF NOT EXISTS kv (
       key   TEXT PRIMARY KEY NOT NULL,
       value TEXT NOT NULL
     );
-    PRAGMA journal_mode = WAL;
   `)
 }
 
