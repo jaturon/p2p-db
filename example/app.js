@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Imports — resolved via the importmap in index.html (no bundler needed)
 // ─────────────────────────────────────────────────────────────────────────────
-import { createP2PDB, DBIndex, IDBStorage, DB_WORKER_URL } from '../src/index.js'
+import { createP2PDB, DBIndex, IDBStorage, DB_WORKER_URL, BOOTSTRAP_LIST } from '../src/index.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI helpers
@@ -9,6 +9,11 @@ import { createP2PDB, DBIndex, IDBStorage, DB_WORKER_URL } from '../src/index.js
 const $ = id => document.getElementById(id)
 
 let activeFilter = null
+
+// Peer IDs of the known bootstrap/relay nodes — used to label them in the sidebar
+const RELAY_PEER_IDS = new Set(
+  BOOTSTRAP_LIST.map(addr => addr.split('/p2p/')[1]).filter(Boolean)
+)
 
 function log(msg, type = 'info') {
   const el = document.createElement('div')
@@ -136,15 +141,32 @@ log(`indexes built — ${db.size} existing records loaded`)
 // peer:disconnect fires when a connection drops (relay reconnects automatically).
 // ─────────────────────────────────────────────────────────────────────────────
 node.on('peer:connect', peerId => {
-  log(`→ peer connected   ${peerId.slice(0, 20)}…`, 'peer')
+  const label = RELAY_PEER_IDS.has(peerId) ? 'relay' : 'peer'
+  log(`→ ${label} connected   ${peerId.slice(0, 20)}…`, 'peer')
   renderPeers()
   setStatus(`connected — ${node.peers.length} peers`)
+  updateRelayAddr()
 })
 
 node.on('peer:disconnect', peerId => {
   log(`→ peer disconnected ${peerId.slice(0, 20)}…`, 'peer')
   renderPeers()
+  updateRelayAddr()
 })
+
+node.on('self:update', updateRelayAddr)
+
+function updateRelayAddr() {
+  const relays = node.relayMultiaddrs
+  const el = $('relay-addr')
+  if (relays.length) {
+    el.textContent = relays[0]
+    el.title = 'Click to copy'
+  } else {
+    el.textContent = 'waiting for relay…'
+    el.title = ''
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 5 — db change events
@@ -173,6 +195,12 @@ log(`my peer ID: ${node.peerId.slice(0, 20)}…`)
 // ─────────────────────────────────────────────────────────────────────────────
 renderNotes()
 renderPeers()
+
+$('relay-addr').addEventListener('click', () => {
+  const addr = $('relay-addr').textContent
+  if (!addr || addr.startsWith('waiting')) return
+  navigator.clipboard.writeText(addr).then(() => log('relay addr copied to clipboard'))
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 8 — write: db.set
@@ -364,12 +392,12 @@ function renderPeers() {
   self.textContent = `▶ ${node.peerId.slice(0, 24)}… (me)`
   list.appendChild(self)
 
-  // node.peers returns currently connected peer IDs (bootstrap + app peers)
   for (const peerId of node.peers) {
+    const isRelay = RELAY_PEER_IDS.has(peerId)
     const el = document.createElement('div')
-    el.className = 'peer-item'
+    el.className = `peer-item ${isRelay ? 'relay' : 'app'}`
     el.title = peerId
-    el.textContent = `○ ${peerId.slice(0, 24)}…`
+    el.textContent = `${isRelay ? '⟳' : '●'} ${peerId.slice(0, 22)}… ${isRelay ? '(relay)' : ''}`
     list.appendChild(el)
   }
 

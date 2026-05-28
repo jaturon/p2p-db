@@ -39,7 +39,7 @@ export class P2PNode {
   constructor(node, topic) {
     this._node = node
     this._topic = topic
-    this._handlers = { message: [], 'peer:connect': [], 'peer:disconnect': [] }
+    this._handlers = { message: [], 'peer:connect': [], 'peer:disconnect': [], 'self:update': [] }
   }
 
   /**
@@ -100,6 +100,12 @@ export class P2PNode {
       p2p._dispatch('peer:disconnect', evt.detail.toString())
     })
 
+    // Fires when the node's multiaddrs change — e.g. when a circuit relay
+    // reservation is obtained and a /p2p-circuit/ address becomes available.
+    node.addEventListener('self:peer:update', () => {
+      p2p._dispatch('self:update')
+    })
+
     return p2p
   }
 
@@ -111,6 +117,13 @@ export class P2PNode {
   /** All active multiaddrs this node is reachable at */
   get multiaddrs() {
     return this._node.getMultiaddrs().map(a => a.toString())
+  }
+
+  /** Circuit-relay multiaddrs — available after relay reservation is made */
+  get relayMultiaddrs() {
+    return this._node.getMultiaddrs()
+      .map(a => a.toString())
+      .filter(a => a.includes('/p2p-circuit/'))
   }
 
   /** Currently connected peer IDs */

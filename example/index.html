@@ -56,7 +56,12 @@
     .peer-item { padding: 6px 14px; font-size: 11px; color: #666;
                  border-bottom: 1px solid #1a1a1a; white-space: nowrap;
                  overflow: hidden; text-overflow: ellipsis; }
-    .peer-item.self { color: #8ec; }
+    .peer-item.self  { color: #8ec; }
+    .peer-item.relay { color: #68a; }
+    .peer-item.app   { color: #8c8; }
+    #relay-addr { font-size: 10px; color: #8ec; word-break: break-all;
+                  white-space: normal; cursor: pointer; }
+    #relay-addr:hover { color: #aef; }
 
     /* ── main area ── */
     #main { display: flex; flex-direction: column; overflow: hidden; }
@@ -122,6 +127,10 @@
     <div class="info-block">
       <label>My peer ID</label>
       <span id="peer-id">starting…</span>
+    </div>
+    <div class="info-block">
+      <label>Relay address (click to copy)</label>
+      <span id="relay-addr">waiting for relay…</span>
     </div>
     <div class="info-block">
       <label>Connected peers (<span id="peer-count">0</span>)</label>
