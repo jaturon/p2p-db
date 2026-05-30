@@ -11,7 +11,7 @@
 
 import { createLibp2p } from 'libp2p'
 import { webSockets } from '@libp2p/websockets'
-import { webRTC } from '@libp2p/webrtc'
+import { all as wsAll } from '@libp2p/websockets/filters'
 import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
 import { pubsubPeerDiscovery } from '@libp2p/pubsub-peer-discovery'
@@ -19,9 +19,6 @@ import { circuitRelayTransport } from '@libp2p/circuit-relay-v2'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { identify } from '@libp2p/identify'
 import { multiaddr } from '@multiformats/multiaddr'
-
-// Allow all WebSocket addresses (ws:// and wss://) including LAN
-const wsAll = addrs => addrs
 
 export const BOOTSTRAP_LIST = [] // kept for API compatibility
 
@@ -38,9 +35,12 @@ function buildRelayCandidates() {
     }
   }
 
-  // Local libp2p_test gateway (dev)
+  // Local relay/gateway (dev) — try both the p2p-db relay default (3000)
+  // and the legacy libp2p_test gateway port (4010)
   const host  = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
   const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:'
+  candidates.push(`${proto}//${host}:3000/api/info`)
+  candidates.push('http://localhost:3000/api/info')
   candidates.push(`${proto}//${host}:4010/api/info`)
   candidates.push('http://localhost:4010/api/info')
 
@@ -91,9 +91,14 @@ export class P2PNode {
     const gateway = await discoverGateway()
 
     const node = await createLibp2p({
+      addresses: {
+        listen: ['/p2p-circuit'],
+      },
       transports: [
+        // wsAll (from @libp2p/websockets/filters) accepts ws:// + wss:// but NOT
+        // /p2p-circuit, so the WebSocket transport won't try to create a browser
+        // server listener when /p2p-circuit is in addresses.listen.
         webSockets({ filter: wsAll }),
-        webRTC(),
         circuitRelayTransport({ discoverRelays: 1 }),
       ],
       connectionEncrypters: [noise()],

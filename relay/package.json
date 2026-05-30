@@ -9,13 +9,13 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "libp2p":                  "^3.0.0",
-    "@libp2p/websockets":      "^10.0.0",
-    "@libp2p/circuit-relay-v2":"^4.0.0",
-    "@libp2p/identify":        "^4.0.0",
-    "@libp2p/crypto":          "^5.0.0",
-    "@libp2p/yamux":           "^8.0.0",
-    "@chainsafe/libp2p-noise": "^17.0.0",
+    "libp2p":                      "^2.0.0",
+    "@libp2p/websockets":          "^9.0.0",
+    "@libp2p/circuit-relay-v2":    "^3.0.0",
+    "@libp2p/identify":            "^3.0.0",
+    "@libp2p/crypto":              "^5.0.0",
+    "@chainsafe/libp2p-yamux":     "^7.0.0",
+    "@chainsafe/libp2p-noise":     "^16.0.0",
     "@chainsafe/libp2p-gossipsub": "^14.0.0"
   }
 }
