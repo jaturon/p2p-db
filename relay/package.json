@@ -1,0 +1,21 @@
+{
+  "name": "p2p-db-relay",
+  "version": "1.0.0",
+  "description": "libp2p circuit relay for p2p-db browser peers",
+  "type": "module",
+  "main": "server.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "libp2p":                  "^3.0.0",
+    "@libp2p/websockets":      "^10.0.0",
+    "@libp2p/circuit-relay-v2":"^4.0.0",
+    "@libp2p/identify":        "^4.0.0",
+    "@libp2p/crypto":          "^5.0.0",
+    "@libp2p/yamux":           "^8.0.0",
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-gossipsub": "^14.0.0"
+  }
+}

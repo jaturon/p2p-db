@@ -1,0 +1,54 @@
+# Fly.io deployment config for the p2p-db relay.
+#
+# Before deploying:
+#   1. Change `app` to your chosen app name.
+#   2. Run: fly launch --no-deploy  (imports this file)
+#   3. Run: fly volumes create relay_data --region sin --size 1
+#   4. Run: fly deploy
+#
+# Once deployed, the relay is reachable at:
+#   API:  https://<app>.fly.dev/api/info
+#   WS:   wss://<app>.fly.dev:4444
+#
+# Set HOSTNAME to match your app name before deploying:
+#   fly secrets set HOSTNAME=<app>.fly.dev
+
+app            = "p2p-db-relay"   # ← change this
+primary_region = "sin"            # Singapore; pick closest: ams, lax, ord, syd …
+
+[build]
+
+[env]
+  WS_PORT          = "8080"
+  API_PORT         = "3000"
+  WS_EXTERNAL_PORT = "4444"
+  # HOSTNAME is set via: fly secrets set HOSTNAME=<app>.fly.dev
+
+[[mounts]]
+  source      = "relay_data"
+  destination = "/data"
+
+# HTTP service: API on port 3000 → exposed as HTTPS on port 443
+[http_service]
+  internal_port        = 3000
+  force_https          = true
+  auto_stop_machines   = "stop"
+  auto_start_machines  = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type       = "connections"
+    hard_limit = 100
+
+# WebSocket service: libp2p WS on port 8080 → exposed as WSS on port 4444
+[[services]]
+  protocol     = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    port     = 4444
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type       = "connections"
+    hard_limit = 256

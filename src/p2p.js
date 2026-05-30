@@ -1,8 +1,13 @@
 // P2P node using libp2p v2 with:
-//   - WebSockets transport
-//   - Circuit relay v2 (local libp2p_test gateway as relay server)
+//   - WebSockets transport (ws:// for local dev; wss:// for deployed relay)
+//   - Circuit relay v2 (relay auto-discovered via /api/info)
 //   - GossipSub pub/sub for topic-based messaging
 //   - pubsub peer discovery
+//
+// Relay discovery order:
+//   1. ?relay=https://my-relay.fly.dev  (URL query param)
+//   2. http://localhost:4010             (local libp2p_test gateway, dev only)
+// Deploy relay/server.js to Fly.io (see relay/fly.toml) for public access.
 
 import { createLibp2p } from 'libp2p'
 import { webSockets } from '@libp2p/websockets'
@@ -18,23 +23,38 @@ import { multiaddr } from '@multiformats/multiaddr'
 // Allow all WebSocket addresses (ws:// and wss://) including LAN
 const wsAll = addrs => addrs
 
-// Gateway API candidates — mirrors browser-client/main.js auto-discovery logic.
-// The libp2p_test Node.js gateway runs on port 4010 (API) / 4012 (WS).
-const GATEWAY_API_CANDIDATES = [
-  `${typeof window !== 'undefined' ? window.location.protocol : 'http:'}//${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:4010/api/info`,
-  'http://localhost:4010/api/info',
-]
+export const BOOTSTRAP_LIST = [] // kept for API compatibility
 
-export const BOOTSTRAP_LIST = [] // not used when local gateway is available
+// Build the ordered list of relay API endpoints to try.
+// ?relay=https://my-relay.fly.dev is checked first so deployed apps work
+// without changing any source files — just change the URL.
+function buildRelayCandidates() {
+  const candidates = []
+
+  if (typeof window !== 'undefined') {
+    const relayParam = new URLSearchParams(window.location.search).get('relay')
+    if (relayParam) {
+      candidates.push(`${relayParam.replace(/\/$/, '')}/api/info`)
+    }
+  }
+
+  // Local libp2p_test gateway (dev)
+  const host  = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+  const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:'
+  candidates.push(`${proto}//${host}:4010/api/info`)
+  candidates.push('http://localhost:4010/api/info')
+
+  return candidates
+}
 
 async function discoverGateway() {
-  for (const url of GATEWAY_API_CANDIDATES) {
+  for (const url of buildRelayCandidates()) {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(2000) })
+      const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
       if (!res.ok) continue
       const info = await res.json()
       const addrs = info.addrs ?? []
-      // Prefer LAN WS address so it works from other machines on the same network
+      // Accept any WebSocket address (ws or wss); prefer non-loopback
       const ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
                ?? addrs.find(a => a.includes('/ws'))
       if (ws) return { addr: ws, peerId: info.peer_id }
