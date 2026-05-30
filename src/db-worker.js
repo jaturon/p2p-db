@@ -42,18 +42,15 @@ async function open(name) {
   `)
 }
 
-// Single parameterized statement — returns rows as arrays.
+// wa-sqlite ≥1.0: prepare_v2() requires a C-string pointer; use statements()
+// which handles str_new/str_value internally and auto-finalizes each stmt.
 async function exec(sql, params = []) {
   const rows = []
-  const prepared = await sqlite3.prepare_v2(db, sql)
-  if (!prepared) return rows
-  try {
-    if (params.length) sqlite3.bind_collection(prepared.stmt, params)
-    while (await sqlite3.step(prepared.stmt) === SQLite.SQLITE_ROW) {
-      rows.push(sqlite3.row(prepared.stmt))
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    if (params.length) sqlite3.bind_collection(stmt, params)
+    while (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+      rows.push(sqlite3.row(stmt))
     }
-  } finally {
-    await sqlite3.finalize(prepared.stmt)
   }
   return rows
 }

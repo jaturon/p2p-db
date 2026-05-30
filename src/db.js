@@ -29,28 +29,22 @@ export const DB_WORKER_URL = new URL('./db-worker.js', import.meta.url)
 
 // ── in-memory SQLite helpers (Mode A only) ────────────────────────────────────
 
+// wa-sqlite ≥1.0 changed prepare_v2() to require a C-string pointer; JS strings
+// must go through statements() which handles the str_new/str_value dance internally.
 async function sqRun(sqlite3, db, sql, params = []) {
-  const prepared = await sqlite3.prepare_v2(db, sql)
-  if (!prepared) return
-  try {
-    if (params.length) sqlite3.bind_collection(prepared.stmt, params)
-    await sqlite3.step(prepared.stmt)
-  } finally {
-    await sqlite3.finalize(prepared.stmt)
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    if (params.length) sqlite3.bind_collection(stmt, params)
+    await sqlite3.step(stmt)
   }
 }
 
 async function sqAll(sqlite3, db, sql, params = []) {
   const rows = []
-  const prepared = await sqlite3.prepare_v2(db, sql)
-  if (!prepared) return rows
-  try {
-    if (params.length) sqlite3.bind_collection(prepared.stmt, params)
-    while (await sqlite3.step(prepared.stmt) === SQLite.SQLITE_ROW) {
-      rows.push(sqlite3.row(prepared.stmt))
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    if (params.length) sqlite3.bind_collection(stmt, params)
+    while (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+      rows.push(sqlite3.row(stmt))
     }
-  } finally {
-    await sqlite3.finalize(prepared.stmt)
   }
   return rows
 }
