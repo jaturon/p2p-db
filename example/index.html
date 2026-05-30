@@ -66,6 +66,13 @@
     #relay-addr { font-size: 10px; color: #8ec; word-break: break-all;
                   white-space: normal; cursor: pointer; }
     #relay-addr:hover { color: #aef; }
+    #relay-connect { display: flex; gap: 6px; margin-top: 6px; }
+    #relay-url { flex: 1; background: #1a1a1a; border: 1px solid #333; color: #e0e0e0;
+                 padding: 3px 7px; border-radius: 3px; font: inherit; font-size: 11px; }
+    #relay-connect-btn { background: #1a3060; border: 1px solid #2a4a8a; color: #7af;
+                         padding: 3px 8px; border-radius: 3px; cursor: pointer;
+                         font: inherit; font-size: 11px; white-space: nowrap; }
+    #relay-connect-btn:hover { background: #233880; }
 
     /* ── main area ── */
     #main { display: flex; flex-direction: column; overflow: hidden; }
@@ -161,6 +168,10 @@
     <div class="info-block">
       <label>Relay address (click to copy)</label>
       <span id="relay-addr">waiting for relay…</span>
+      <div id="relay-connect">
+        <input id="relay-url" type="text" placeholder="https://my-relay.fly.dev">
+        <button id="relay-connect-btn">Connect</button>
+      </div>
     </div>
     <div class="info-block">
       <label>Notes</label>

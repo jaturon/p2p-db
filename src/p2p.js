@@ -47,8 +47,8 @@ function buildRelayCandidates() {
   return candidates
 }
 
-async function discoverGateway() {
-  for (const url of buildRelayCandidates()) {
+async function discoverGateway(extraUrls = []) {
+  for (const url of [...extraUrls, ...buildRelayCandidates()]) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
       if (!res.ok) continue
@@ -186,6 +186,27 @@ export class P2PNode {
   /** Currently connected peer IDs */
   get peers() {
     return this._node.getPeers().map(p => p.toString())
+  }
+
+  /**
+   * Dial a relay by its /api/info URL and make a circuit relay reservation.
+   * Use this after node creation to connect to a relay entered in the UI.
+   * Returns true on success, false if the relay could not be reached.
+   *
+   * @param {string} relayBaseUrl  e.g. 'https://my-relay.fly.dev'
+   */
+  async dialRelay(relayBaseUrl) {
+    const apiUrl = `${relayBaseUrl.replace(/\/$/, '')}/api/info`
+    const gateway = await discoverGateway([apiUrl])
+    if (!gateway) return false
+    try {
+      await this._node.dial(multiaddr(gateway.addr))
+      console.log('[p2p] connected to relay:', gateway.addr)
+      return true
+    } catch (err) {
+      console.warn('[p2p] relay dial failed:', err.message)
+      return false
+    }
   }
 
   /**

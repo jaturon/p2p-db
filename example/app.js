@@ -156,6 +156,31 @@ function updateRelayAddr() {
 // Poll every 3 s as a fallback in case self:peer:update doesn't fire
 setInterval(updateRelayAddr, 3000)
 
+// Pre-fill relay input from ?relay= URL param
+const relayParam = new URLSearchParams(location.search).get('relay')
+if (relayParam) $('relay-url').value = relayParam
+
+$('relay-connect-btn').addEventListener('click', async () => {
+  const url = $('relay-url').value.trim()
+  if (!url) return
+  const btn = $('relay-connect-btn')
+  btn.textContent = 'connecting…'
+  btn.disabled = true
+  const ok = await node.dialRelay(url)
+  btn.textContent = ok ? 'connected ✓' : 'failed ✗'
+  btn.disabled = false
+  if (ok) {
+    log(`relay connected: ${url}`, 'peer')
+    // Update URL bar so the link is shareable
+    const u = new URL(location.href)
+    u.searchParams.set('relay', url)
+    history.replaceState(null, '', u.toString())
+  } else {
+    log(`relay unreachable: ${url}`, 'err')
+    setTimeout(() => { btn.textContent = 'Connect' }, 3000)
+  }
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 5 — db change events
 //
