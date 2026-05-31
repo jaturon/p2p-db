@@ -101,7 +101,15 @@ const { db, node } = await createP2PDB({
   },
 })
 
-log(`database opened (${idbAvailable ? 'IDB mode' : 'memory mode'})`)
+// _initIDB may have silently fallen back to memory mode (e.g. Firefox < 114).
+// Detect this and update the badge so the user sees the real storage mode.
+const actuallyIDB = idbAvailable && db._idb != null
+if (!actuallyIDB && idbAvailable) {
+  badge.textContent = 'Memory + localStorage'
+  badge.className = 'mem'
+  log('IDB worker unavailable — using in-memory + localStorage fallback', 'peer')
+}
+log(`database opened (${actuallyIDB ? 'IDB mode' : 'memory mode'})`)
 setStatus('connecting to peers…')
 
 // ─────────────────────────────────────────────────────────────────────────────

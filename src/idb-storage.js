@@ -4,12 +4,15 @@
 
 export class IDBStorage {
   /**
-   * Returns true when the environment can run IDBBatchAtomicVFS.
-   * Requires SharedArrayBuffer (needs COOP + COEP HTTP headers) and Atomics.
+   * Returns true when the environment looks capable of running the IDB worker.
+   * Actual worker startup can still fail (e.g. Firefox < 114 lacks module
+   * worker support); DBIndex._initIDB catches that and falls back automatically.
    */
   static isAvailable() {
-    // wa-sqlite ≥1.0 uses Web Locks (not SharedArrayBuffer/Atomics) for the
-    // IDB VFS bridge, so the only hard requirement is navigator.locks.
+    // Web Locks API is required by wa-sqlite ≥1.0's IDBBatchAtomicVFS.
+    // Module worker support (needed for db-worker.js) is Firefox 114+, Chrome
+    // 80+, Safari 15+ — a superset of Web Locks, so Web Locks is sufficient
+    // as a heuristic.  The fallback in _initIDB handles the rest.
     return typeof navigator !== 'undefined'
       && typeof navigator.locks !== 'undefined'
   }

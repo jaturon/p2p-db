@@ -196,14 +196,22 @@ export class DBIndex {
   // ── init paths ────────────────────────────────────────────────────────────────
 
   async _initIDB(workerUrl) {
-    this._idb = new IDBStorage(workerUrl)
-    // Open the IDB-backed database in the Worker
-    await this._idb.call('open', this.name)
-    // Hydrate _store from the persisted rows (Worker reads from IDB via SQLite)
-    for (const [k, v] of await this._idb.call('load')) {
-      this._store.set(k, v)
+    // Firefox < 114 does not support { type:'module' } workers; the Worker
+    // creation succeeds but the worker fires onerror, which rejects any
+    // pending call.  Catch that and fall back to memory mode so the app
+    // still initialises and GossipSub sync still works.
+    try {
+      this._idb = new IDBStorage(workerUrl)
+      await this._idb.call('open', this.name)
+      for (const [k, v] of await this._idb.call('load')) {
+        this._store.set(k, v)
+      }
+    } catch (err) {
+      console.warn('[DBIndex] IDB worker failed, falling back to memory mode:', err.message)
+      try { this._idb?.terminate() } catch {}
+      this._idb = null
+      await this._initMemory()
     }
-    // Secondary indexes are built by the caller after open() returns via index()
   }
 
   async _initMemory() {
