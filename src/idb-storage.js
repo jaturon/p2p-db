@@ -28,9 +28,10 @@ export class IDBStorage {
       ? workerUrl
       : new URL(workerUrl, import.meta.url)
 
-    this._worker = new Worker(url, { type: 'module' })
+    this._worker  = new Worker(url, { type: 'module' })
     this._pending = new Map()
-    this._seq = 0
+    this._seq     = 0
+    this._crashed = false   // set on worker error; stops further postMessage calls
 
     this._worker.addEventListener('message', ({ data: { id, result, error } }) => {
       const p = this._pending.get(id)
@@ -39,8 +40,11 @@ export class IDBStorage {
       error ? p.reject(new Error(error)) : p.resolve(result)
     })
 
-    // If the Worker itself crashes, reject every in-flight call
+    // When the worker crashes (WASM abort, OOM, etc.) reject every in-flight
+    // call and set _crashed so subsequent call() invocations fail immediately
+    // without sending to a dead worker.
     this._worker.addEventListener('error', (evt) => {
+      this._crashed = true
       const err = new Error(`db-worker error: ${evt.message ?? 'unknown'}`)
       for (const [, p] of this._pending) p.reject(err)
       this._pending.clear()
@@ -48,6 +52,7 @@ export class IDBStorage {
   }
 
   call(method, ...args) {
+    if (this._crashed) return Promise.reject(new Error('IDB worker crashed'))
     return new Promise((resolve, reject) => {
       const id = this._seq++
       this._pending.set(id, { resolve, reject })

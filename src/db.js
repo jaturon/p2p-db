@@ -263,12 +263,49 @@ export class DBIndex {
     return next
   }
 
+  // Switch from IDB mode to memory+localStorage when the IDB worker crashes
+  // (e.g. WASM abort from a corrupted database file).  Bulk-loads _store into
+  // a fresh in-memory SQLite so db.sql() keeps working, then persists to localStorage.
+  async _fallbackToMemory(reason) {
+    console.warn('[DBIndex] IDB worker failed, falling back to memory mode:', reason)
+    try { await this._idb?.terminate() } catch {}
+    this._idb = null
+    if (!this._db) {
+      try {
+        const module = await SQLiteESMFactory()
+        this._sqlite3 = SQLite.Factory(module)
+        this._db = await this._sqlite3.open_v2(':memory:')
+        await this._sqlite3.exec(this._db, `
+          CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)
+        `)
+        for (const [k, v] of this._store) {
+          await sqRun(this._sqlite3, this._db,
+            'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)',
+            [k, JSON.stringify(v)])
+        }
+      } catch (e) {
+        console.warn('[DBIndex] memory SQLite also failed:', e)
+      }
+    }
+    this._lsPersist()
+  }
+
   async _applySet(key, value, remote = false, from = null) {
     this._store.set(key, value)
     this._syncIndexes(key, value)
 
     if (this._idb) {
-      await this._idb.call('set', key, value)
+      try {
+        await this._idb.call('set', key, value)
+      } catch (err) {
+        await this._fallbackToMemory(err.message)
+        if (this._db) {
+          await this._sqOp(() => sqRun(this._sqlite3, this._db,
+            'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)',
+            [key, JSON.stringify(value)]))
+        }
+        this._lsPersist()
+      }
     } else {
       if (this._db) {
         await this._sqOp(() => sqRun(this._sqlite3, this._db,
@@ -289,7 +326,11 @@ export class DBIndex {
     this._purgeIndexes(key)
 
     if (this._idb) {
-      await this._idb.call('delete', key)
+      try {
+        await this._idb.call('delete', key)
+      } catch (err) {
+        await this._fallbackToMemory(err.message)
+      }
     } else {
       if (this._db) {
         await this._sqOp(() => sqRun(this._sqlite3, this._db,
