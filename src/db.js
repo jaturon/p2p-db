@@ -49,6 +49,38 @@ async function sqAll(sqlite3, db, sql, params = []) {
   return rows
 }
 
+// Returns rows as [{colName: value, …}, …] using column_names()
+async function sqAllObj(sqlite3, db, sql, params = []) {
+  const rows = []
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    if (params.length) sqlite3.bind_collection(stmt, params)
+    let cols = null
+    while (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+      if (!cols) cols = sqlite3.column_names(stmt)
+      const row = sqlite3.row(stmt)
+      const obj = {}
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i]
+      rows.push(obj)
+    }
+  }
+  return rows
+}
+
+// Returns first row as {colName: value, …} or null
+async function sqFirst(sqlite3, db, sql, params = []) {
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    if (params.length) sqlite3.bind_collection(stmt, params)
+    if (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+      const cols = sqlite3.column_names(stmt)
+      const row  = sqlite3.row(stmt)
+      const obj  = {}
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i]
+      return obj
+    }
+  }
+  return null
+}
+
 // ── DBIndex ───────────────────────────────────────────────────────────────────
 
 export class DBIndex {
@@ -146,15 +178,13 @@ export class DBIndex {
     return [...keys].map(k => this._store.get(k)).filter(v => v !== undefined)
   }
 
+  // ── SQLite query helpers ──────────────────────────────────────────────────────
+  // kv table schema:  key TEXT PRIMARY KEY,  value TEXT (JSON)
+  // json_extract(value, '$.field')  for field-level access in SQL.
+
   /**
-   * Run a parameterized SQL query against the kv table.
-   * Schema: kv(key TEXT PRIMARY KEY, value TEXT)  — value is JSON.
-   * Use json_extract() for field-level filtering:
-   *   db.sql("SELECT key FROM kv WHERE json_extract(value,'$.status')=?", ['unread'])
-   *
-   * Mode A: runs on main thread in-memory SQLite. Returns null if WASM unavailable.
-   * Mode B: proxied to Worker, returns rows from IDB-backed SQLite.
-   * Always returns: [[col0, col1, …], …]
+   * sql(query, params?) → [[col,…],…]
+   * Raw SQL — returns rows as arrays of column values.
    */
   async sql(query, params = []) {
     if (this._idb) return this._idb.call('sql', query, params)
@@ -162,9 +192,283 @@ export class DBIndex {
     return this._sqOp(() => sqAll(this._sqlite3, this._db, query, params))
   }
 
+  /**
+   * sqlGet(query, params?) → {col: val, …} | null
+   * Returns the first row as a named-column object, or null if no rows.
+   */
+  async sqlGet(query, params = []) {
+    if (this._idb) return this._idb.call('sqlGet', query, params)
+    if (!this._db) return null
+    return this._sqOp(() => sqFirst(this._sqlite3, this._db, query, params))
+  }
+
+  /**
+   * sqlAll(query, params?) → [{col: val, …}, …]
+   * Like sql() but rows are objects keyed by column name.
+   */
+  async sqlAll(query, params = []) {
+    if (this._idb) return this._idb.call('sqlAll', query, params)
+    if (!this._db) return null
+    return this._sqOp(() => sqAllObj(this._sqlite3, this._db, query, params))
+  }
+
+  /**
+   * sqlValue(query, params?) → scalar | null
+   * Returns the first column of the first row — handy for COUNT(*), MAX, etc.
+   */
+  async sqlValue(query, params = []) {
+    if (this._idb) return this._idb.call('sqlValue', query, params)
+    if (!this._db) return null
+    return this._sqOp(async () => {
+      const rows = await sqAll(this._sqlite3, this._db, query, params)
+      return rows.length ? rows[0][0] : null
+    })
+  }
+
+  /**
+   * sqlRun(query, params?) → { changes: n, lastInsertRowId: n }
+   * Execute a statement that modifies data (INSERT / UPDATE / DELETE).
+   */
+  async sqlRun(query, params = []) {
+    if (this._idb) return this._idb.call('sqlRun', query, params)
+    if (!this._db) return null
+    return this._sqOp(async () => {
+      await sqRun(this._sqlite3, this._db, query, params)
+      const [[changes]]      = await sqAll(this._sqlite3, this._db, 'SELECT changes()')
+      const [[lastId]]       = await sqAll(this._sqlite3, this._db, 'SELECT last_insert_rowid()')
+      return { changes, lastInsertRowId: lastId }
+    })
+  }
+
+  /**
+   * sqlTransaction(fn) → result of fn()
+   * Run a callback inside a BEGIN / COMMIT block.
+   * fn receives this db instance.  Rolls back automatically on error.
+   *
+   * Note: in IDB mode each individual write goes to the worker; the
+   * BEGIN/COMMIT are still sent but the IDB durability boundary is the
+   * WAL flush, not the SQLite transaction.
+   */
+  async sqlTransaction(fn) {
+    if (this._idb) {
+      await this._idb.call('sql', 'BEGIN', [])
+      try {
+        const result = await fn(this)
+        await this._idb.call('sql', 'COMMIT', [])
+        return result
+      } catch (err) {
+        await this._idb.call('sql', 'ROLLBACK', []).catch(() => {})
+        throw err
+      }
+    }
+    if (!this._db) throw new Error('SQLite not available')
+    return this._sqOp(async () => {
+      await sqRun(this._sqlite3, this._db, 'BEGIN')
+      try {
+        const result = await fn(this)
+        await sqRun(this._sqlite3, this._db, 'COMMIT')
+        return result
+      } catch (err) {
+        await sqRun(this._sqlite3, this._db, 'ROLLBACK').catch(() => {})
+        throw err
+      }
+    })
+  }
+
+  /**
+   * pragma(name, value?) → current value
+   * Get or set a SQLite PRAGMA.  e.g. db.pragma('journal_mode') → 'memory'
+   */
+  async pragma(name, value) {
+    const q = value !== undefined ? `PRAGMA ${name} = ${value}` : `PRAGMA ${name}`
+    const rows = await this.sql(q)
+    return rows?.length ? rows[0][0] : null
+  }
+
   on(event, handler) {
     this._emitter.addEventListener(event, e => handler(e.detail))
     return this
+  }
+
+  // ── Extended read API ─────────────────────────────────────────────────────────
+
+  /** All primary keys in insertion order. */
+  keys() { return [...this._store.keys()] }
+
+  /** All values in insertion order. */
+  values() { return [...this._store.values()] }
+
+  /** Count records, optionally matching predicate(value, key). */
+  count(predicate) {
+    if (!predicate) return this._store.size
+    let n = 0
+    for (const [key, value] of this._store) if (predicate(value, key)) n++
+    return n
+  }
+
+  /** First record (optionally matching predicate). Returns {key,value} or undefined. */
+  first(predicate) {
+    for (const [key, value] of this._store)
+      if (!predicate || predicate(value, key)) return { key, value }
+    return undefined
+  }
+
+  /** Last record (optionally matching predicate). Returns {key,value} or undefined. */
+  last(predicate) {
+    let result
+    for (const [key, value] of this._store)
+      if (!predicate || predicate(value, key)) result = { key, value }
+    return result
+  }
+
+  /**
+   * Get multiple records by key. Returns a plain object { key: value, … }.
+   * Missing keys are omitted.
+   */
+  getMany(keys) {
+    const out = {}
+    for (const k of keys) {
+      const v = this._store.get(k)
+      if (v !== undefined) out[k] = v
+    }
+    return out
+  }
+
+  // ── Index extensions ──────────────────────────────────────────────────────────
+
+  /**
+   * Like query() but returns [{key, value}, …] instead of values only.
+   * Fixes the key-recovery problem in the original example code.
+   */
+  queryEntries(indexName, indexValue) {
+    const idx = this._indexes.get(indexName)
+    if (!idx) return []
+    const keys = idx.map.get(indexValue)
+    if (!keys) return []
+    return [...keys]
+      .map(k => ({ key: k, value: this._store.get(k) }))
+      .filter(e => e.value !== undefined)
+  }
+
+  /** Like query() but returns only the primary keys. */
+  queryKeys(indexName, indexValue) {
+    const idx = this._indexes.get(indexName)
+    if (!idx) return []
+    return [...(idx.map.get(indexValue) ?? [])]
+  }
+
+  /**
+   * All unique index values currently in the bucket map.
+   * e.g. db.indexValues('tag') → ['general', 'work', 'idea']
+   */
+  indexValues(indexName) {
+    const idx = this._indexes.get(indexName)
+    return idx ? [...idx.map.keys()] : []
+  }
+
+  // ── Bulk write API ────────────────────────────────────────────────────────────
+
+  /**
+   * Set multiple records in one call.
+   * In IDB mode the writes are issued as a batch; in Mode A they go through
+   * the serial _sqlQ so no concurrent-tmpPtr crashes occur.
+   *
+   * @param {Array<[key, value]> | Iterable<[key, value]>} entries
+   */
+  async setMany(entries) {
+    const pairs = [...entries]
+    for (const [key, value] of pairs) {
+      this._store.set(key, value)
+      this._syncIndexes(key, value)
+    }
+    if (this._idb) {
+      try {
+        await this._idb.call('setMany', pairs)
+      } catch (err) {
+        await this._fallbackToMemory(err.message)
+        if (this._db) for (const [k, v] of pairs)
+          await this._sqOp(() => sqRun(this._sqlite3, this._db,
+            'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', [k, JSON.stringify(v)]))
+        this._lsPersist()
+      }
+    } else {
+      if (this._db) for (const [k, v] of pairs)
+        await this._sqOp(() => sqRun(this._sqlite3, this._db,
+          'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', [k, JSON.stringify(v)]))
+      this._lsPersist()
+    }
+    for (const [key, value] of pairs) this._emit('change', { op: 'set', key, value })
+    return this
+  }
+
+  /**
+   * Delete multiple records in one call.
+   * @param {string[]} keys
+   */
+  async deleteMany(keys) {
+    const present = keys.filter(k => this._store.has(k))
+    for (const k of present) { this._store.delete(k); this._purgeIndexes(k) }
+    if (this._idb) {
+      try { await this._idb.call('deleteMany', present) }
+      catch (err) { await this._fallbackToMemory(err.message) }
+    } else {
+      if (this._db) for (const k of present)
+        await this._sqOp(() => sqRun(this._sqlite3, this._db, 'DELETE FROM kv WHERE key = ?', [k]))
+      this._lsPersist()
+    }
+    for (const k of present) this._emit('change', { op: 'delete', key: k })
+    return this
+  }
+
+  // ── Atomic update ─────────────────────────────────────────────────────────────
+
+  /**
+   * Atomic read-modify-write.
+   * updater(currentValue) → newValue  — if newValue is undefined, the key is deleted.
+   *
+   * @param {string} key
+   * @param {function} updater
+   */
+  async update(key, updater) {
+    const next = updater(this._store.get(key))
+    return next === undefined ? this.delete(key) : this.set(key, next)
+  }
+
+  // ── Subscription ──────────────────────────────────────────────────────────────
+
+  /**
+   * Watch a single key for changes.
+   * Returns an unsubscribe function.
+   *
+   * @param {string} key
+   * @param {function} handler  ({ op, value, remote, from }) => void
+   */
+  watch(key, handler) {
+    const fn = e => { if (e.detail.key === key) handler(e.detail) }
+    this._emitter.addEventListener('change', fn)
+    return () => this._emitter.removeEventListener('change', fn)
+  }
+
+  // ── Export / Import ───────────────────────────────────────────────────────────
+
+  /**
+   * Export the full store as a plain object { key: value, … }.
+   */
+  export() {
+    const out = {}
+    for (const [k, v] of this._store) out[k] = v
+    return out
+  }
+
+  /**
+   * Bulk-import records.
+   * @param {Object|Array<[key,value]>} data  plain object or [[key,value],…]
+   * @param {{ clear?: boolean }} opts  clear=true wipes existing data first
+   */
+  async import(data, { clear = false } = {}) {
+    if (clear) await this.clear()
+    const entries = Array.isArray(data) ? data : Object.entries(data)
+    return this.setMany(entries)
   }
 
   async clear() {

@@ -55,6 +55,38 @@ async function exec(sql, params = []) {
   return rows
 }
 
+// rows as [{colName: val}, …]
+async function execObj(sql, params = []) {
+  const rows = []
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    if (params.length) sqlite3.bind_collection(stmt, params)
+    let cols = null
+    while (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+      if (!cols) cols = sqlite3.column_names(stmt)
+      const row = sqlite3.row(stmt)
+      const obj = {}
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i]
+      rows.push(obj)
+    }
+  }
+  return rows
+}
+
+// first row as {colName: val} or null
+async function execFirst(sql, params = []) {
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    if (params.length) sqlite3.bind_collection(stmt, params)
+    if (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+      const cols = sqlite3.column_names(stmt)
+      const row  = sqlite3.row(stmt)
+      const obj  = {}
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i]
+      return obj
+    }
+  }
+  return null
+}
+
 self.addEventListener('message', async ({ data: { id, method, args } }) => {
   try {
     let result
@@ -84,6 +116,27 @@ self.addEventListener('message', async ({ data: { id, method, args } }) => {
         result = null
         break
 
+      // Bulk set — args[0] = [[key, value], …]
+      case 'setMany':
+        await exec('BEGIN')
+        try {
+          for (const [k, v] of args[0])
+            await exec('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', [k, JSON.stringify(v)])
+          await exec('COMMIT')
+        } catch (e) { await exec('ROLLBACK'); throw e }
+        result = null
+        break
+
+      // Bulk delete — args[0] = [key, …]
+      case 'deleteMany':
+        await exec('BEGIN')
+        try {
+          for (const k of args[0]) await exec('DELETE FROM kv WHERE key = ?', [k])
+          await exec('COMMIT')
+        } catch (e) { await exec('ROLLBACK'); throw e }
+        result = null
+        break
+
       case 'clear':
         await exec('DELETE FROM kv')
         result = null
@@ -92,6 +145,29 @@ self.addEventListener('message', async ({ data: { id, method, args } }) => {
       // Raw SQL passthrough — args[0]=query, args[1]=params[]
       case 'sql':
         result = await exec(args[0], args[1] ?? [])
+        break
+
+      // Named-column variants
+      case 'sqlAll':
+        result = await execObj(args[0], args[1] ?? [])
+        break
+
+      case 'sqlGet':
+        result = await execFirst(args[0], args[1] ?? [])
+        break
+
+      case 'sqlValue': {
+        const rows = await exec(args[0], args[1] ?? [])
+        result = rows.length ? rows[0][0] : null
+        break
+      }
+
+      case 'sqlRun':
+        await exec(args[0], args[1] ?? [])
+        result = {
+          changes:          (await exec('SELECT changes()'))[0]?.[0] ?? 0,
+          lastInsertRowId:  (await exec('SELECT last_insert_rowid()'))[0]?.[0] ?? 0,
+        }
         break
 
       // Flush WAL checkpoint to IDB before the Worker is terminated
