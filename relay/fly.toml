@@ -13,7 +13,7 @@
 # Set HOSTNAME to match your app name before deploying:
 #   fly secrets set HOSTNAME=<app>.fly.dev
 
-app            = "p2p-db-relay"   # ← change this
+app            = "p2p-db-relay"   # ← change this (or use the SSH server at 202.44.53.65)
 primary_region = "sin"            # Singapore; pick closest: ams, lax, ord, syd …
 
 [build]
