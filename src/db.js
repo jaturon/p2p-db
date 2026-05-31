@@ -63,6 +63,12 @@ export class DBIndex {
     this._db = null
     // Mode B handle — set by _initIDB(), signals IDB path throughout
     this._idb = null
+    // Serial queue for Mode A SQLite calls.
+    // wa-sqlite's prepare_v2 uses a shared tmpPtr buffer; concurrent awaited
+    // calls race and corrupt each other's statement handles (SQLITE_MISUSE /
+    // WASM memory-out-of-bounds). All Mode A writes go through this queue so
+    // only one SQLite statement is alive at a time.
+    this._sqlQ = Promise.resolve()
   }
 
   /**
@@ -153,7 +159,7 @@ export class DBIndex {
   async sql(query, params = []) {
     if (this._idb) return this._idb.call('sql', query, params)
     if (!this._db) return null
-    return sqAll(this._sqlite3, this._db, query, params)
+    return this._sqOp(() => sqAll(this._sqlite3, this._db, query, params))
   }
 
   on(event, handler) {
@@ -169,7 +175,7 @@ export class DBIndex {
     if (this._idb) {
       await this._idb.call('clear')
     } else {
-      if (this._db) await sqRun(this._sqlite3, this._db, 'DELETE FROM kv')
+      if (this._db) await this._sqOp(() => sqRun(this._sqlite3, this._db, 'DELETE FROM kv'))
       this._lsPersist()
     }
 
@@ -249,6 +255,14 @@ export class DBIndex {
   // Used by both the public API (set/delete) and the P2P sync layer (_applySet/
   // _applyDelete called directly from index.js to avoid re-broadcasting).
 
+  // Serialize a Mode A SQLite call through _sqlQ so concurrent onMessage
+  // handlers never overlap inside wa-sqlite's shared tmpPtr buffer.
+  _sqOp(fn) {
+    const next = this._sqlQ.then(fn)
+    this._sqlQ = next.catch(() => {})  // keep queue alive on error
+    return next
+  }
+
   async _applySet(key, value, remote = false, from = null) {
     this._store.set(key, value)
     this._syncIndexes(key, value)
@@ -257,9 +271,9 @@ export class DBIndex {
       await this._idb.call('set', key, value)
     } else {
       if (this._db) {
-        await sqRun(this._sqlite3, this._db,
+        await this._sqOp(() => sqRun(this._sqlite3, this._db,
           'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)',
-          [key, JSON.stringify(value)])
+          [key, JSON.stringify(value)]))
       }
       this._lsPersist()
     }
@@ -277,7 +291,10 @@ export class DBIndex {
     if (this._idb) {
       await this._idb.call('delete', key)
     } else {
-      if (this._db) await sqRun(this._sqlite3, this._db, 'DELETE FROM kv WHERE key = ?', [key])
+      if (this._db) {
+        await this._sqOp(() => sqRun(this._sqlite3, this._db,
+          'DELETE FROM kv WHERE key = ?', [key]))
+      }
       this._lsPersist()
     }
 
