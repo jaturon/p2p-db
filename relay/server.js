@@ -48,7 +48,11 @@ const WS_EXTERNAL_PORT = parseInt(process.env.WS_EXTERNAL_PORT ?? '443')
 // The relay joins these topics so it can route messages between browsers
 // that are only connected to the relay and not directly to each other.
 // Must include both the peer-discovery topic and any app topics.
-const TOPICS = (process.env.TOPICS ?? 'p2p-db-notes-v1').split(',').map(t => t.trim()).filter(Boolean)
+// Default topics: app data topic + pubsub peer-discovery topic.
+// The peer-discovery topic must be routed so browsers can find each other
+// and form direct connections (enabling browser-as-relay).
+const TOPICS = (process.env.TOPICS ?? 'p2p-db-notes-v1,_peer-discovery._p2p._pubsub')
+  .split(',').map(t => t.trim()).filter(Boolean)
 
 // Key file: prefer /data/ (Fly.io volume mount) if it exists
 const KEY_FILE = process.env.KEY_FILE ??

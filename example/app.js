@@ -565,12 +565,24 @@ function renderPeers() {
   self.textContent = `▶ ${node.peerId.slice(0, 24)}… (me)`
   list.appendChild(self)
 
+  // Peers whose circuit relay addresses include this peer ID are acting as
+  // a browser relay for us (they have circuitRelayServer running).
+  const browserRelayIds = new Set(
+    node.relayMultiaddrs
+      .map(a => { const m = a.match(/\/p2p-circuit\/p2p\/([^/]+)\/p2p-circuit/); return m?.[1] })
+      .filter(Boolean)
+  )
+
   for (const peerId of node.peers) {
-    const isRelay = RELAY_PEER_IDS.has(peerId)
+    const isServerRelay  = RELAY_PEER_IDS.has(peerId)
+    const isBrowserRelay = browserRelayIds.has(peerId)
+    const cls  = isServerRelay ? 'relay' : isBrowserRelay ? 'relay browser-relay' : 'app'
+    const icon = isServerRelay ? '⟳' : isBrowserRelay ? '⟳' : '●'
+    const lbl  = isServerRelay ? '(relay)' : isBrowserRelay ? '(browser relay)' : ''
     const el = document.createElement('div')
-    el.className = `peer-item ${isRelay ? 'relay' : 'app'}`
+    el.className = `peer-item ${cls}`
     el.title = peerId
-    el.textContent = `${isRelay ? '⟳' : '●'} ${peerId.slice(0, 22)}… ${isRelay ? '(relay)' : ''}`
+    el.textContent = `${icon} ${peerId.slice(0, 22)}… ${lbl}`
     list.appendChild(el)
   }
 

@@ -14,8 +14,11 @@ import { webSockets } from '@libp2p/websockets'
 import { all as wsAll } from '@libp2p/websockets/filters'
 import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
-import { pubsubPeerDiscovery } from '@libp2p/pubsub-peer-discovery'
-import { circuitRelayTransport } from '@libp2p/circuit-relay-v2'
+// pubsubPeerDiscovery removed — GossipSub signature validation prevents it
+// from routing across different libp2p versions. Browser discovery uses
+// db:peer-announce messages over the confirmed-working notes topic instead.
+import { circuitRelayTransport, circuitRelayServer } from '@libp2p/circuit-relay-v2'
+import { webRTC } from '@libp2p/webrtc'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { identify } from '@libp2p/identify'
 import { multiaddr } from '@multiformats/multiaddr'
@@ -110,13 +113,20 @@ export class P2PNode {
 
     const node = await createLibp2p({
       addresses: {
-        listen: ['/p2p-circuit'],
+        // /p2p-circuit  — circuit relay reservation (server relay gives us a public addr)
+        // /webrtc       — WebRTC via circuit relay signaling; once established the
+        //                 direct peer connection survives relay death
+        listen: ['/p2p-circuit', '/webrtc'],
       },
       transports: [
         // wsAll (from @libp2p/websockets/filters) accepts ws:// + wss:// but NOT
         // /p2p-circuit, so the WebSocket transport won't try to create a browser
         // server listener when /p2p-circuit is in addresses.listen.
         webSockets({ filter: wsAll }),
+        // WebRTC: after signaling over a circuit relay, the actual data connection
+        // is peer-to-peer and survives relay death.  Browsers that connected via
+        // a server relay can upgrade to WebRTC and keep talking after it dies.
+        webRTC(),
         // discoverRelays tells libp2p how many relay reservations to maintain.
         // More than 1 means the browser keeps a slot at each relay; if one
         // goes down it stays reachable via the others.
@@ -126,11 +136,16 @@ export class P2PNode {
       streamMuxers: [yamux()],
       // Allow dialing private/LAN addresses (gateway is on LAN)
       connectionGater: { denyDialMultiaddr: async () => false },
-      peerDiscovery: [
-        pubsubPeerDiscovery({ interval: 10_000 }),
-      ],
       services: {
         identify: identify(),
+
+        // Browser-as-relay: every open tab acts as a circuit relay server so
+        // peers that connect through a server relay can then use this browser
+        // as an additional relay for other browsers.  If the server relay goes
+        // down, connected browsers continue routing for each other.
+        // maxReservations is kept small — a browser tab is not a server.
+        relay: circuitRelayServer({ reservations: { maxReservations: 10 } }),
+
         pubsub: gossipsub({
           allowPublishToZeroTopicPeers: true,
           emitSelf: false,

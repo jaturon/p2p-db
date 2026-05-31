@@ -1,6 +1,7 @@
 export { DBIndex, DB_WORKER_URL } from './db.js'
 export { IDBStorage } from './idb-storage.js'
 export { P2PNode, BOOTSTRAP_LIST } from './p2p.js'
+import { multiaddr } from '@multiformats/multiaddr'
 
 /**
  * createP2PDB — open a DBIndex and wire it to a GossipSub P2P node so that
@@ -45,6 +46,20 @@ export async function createP2PDB(opts = {}) {
         // A newly joined peer asked for our full state. Broadcast everything we have.
         for (const { key, value } of db.all()) {
           node.send({ __type: 'db:set', key, value }).catch(() => {})
+        }
+        // Also announce our circuit relay addresses so the requester can dial
+        // us directly and use us as a browser relay (if we have circuitRelayServer).
+        const addrs = node.relayMultiaddrs
+        if (addrs.length) {
+          node.send({ __type: 'db:peer-announce', addrs }).catch(() => {})
+        }
+      } else if (msg?.__type === 'db:peer-announce') {
+        // Another browser announced its circuit relay addresses.
+        // Dial it to establish a direct p2p-circuit connection — once connected,
+        // the circuitRelayTransport will detect it supports HOP and make a
+        // reservation with it, turning it into an additional browser relay.
+        for (const addr of (msg.addrs ?? [])) {
+          node._node.dial(multiaddr(addr)).catch(() => {})
         }
       } else {
         onMessage?.(from, msg)
