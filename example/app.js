@@ -127,7 +127,12 @@ if (!db._idb && idbAvailable) {
 }
 log(`database opened (${db._idb ? 'IDB mode' : 'memory mode'})`)
 setInterval(updateStorageBadge, 2000)
-setStatus('connecting to peers…')
+if (node.peers.length === 0) {
+  setStatus('no relay — enter URL in sidebar to sync')
+  log('No relay found. Enter a relay URL below and click Connect to enable cross-browser sync.', 'peer')
+} else {
+  setStatus('connecting to peers…')
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 3 — define secondary indexes

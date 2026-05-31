@@ -179,7 +179,7 @@ export class P2PNode {
     // circuit relay reservation; if any relay later goes down the others
     // keep it reachable.
     if (gateways.length === 0) {
-      console.warn('[p2p] no relay found — running dial-only (no inbound reachability)')
+      console.log('[p2p] no relay configured — enter a relay URL in the sidebar to enable sync')
     }
     for (const gw of gateways) {
       try {
