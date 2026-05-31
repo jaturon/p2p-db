@@ -19,10 +19,11 @@ let editingKey   = null   // primary key of note being edited inline, or null
 const RELAY_PEER_IDS = new Set()
 {
   const param   = new URLSearchParams(location.search).get('relay')
-  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+  const host    = location.hostname
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')
   const urls = param
     ? param.split(',').map(u => `${u.trim().replace(/\/$/, '')}/api/info`).filter(Boolean)
-    : isLocal ? ['http://localhost:4010/api/info'] : []
+    : isLocal ? [`http://${host}:4010/api/info`] : []
   for (const url of urls) {
     fetch(url, { signal: AbortSignal.timeout(2000) })
       .then(r => r.json()).then(info => { if (info.peer_id) RELAY_PEER_IDS.add(info.peer_id) })

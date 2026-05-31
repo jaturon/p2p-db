@@ -44,15 +44,23 @@ function buildRelayCandidates() {
     }
   }
 
-  // When no custom relay is configured and the page is on localhost,
-  // auto-try the local relay ports. On a LAN IP (192.168.x.x) we skip
-  // local scanning — those fetches would always fail with ERR_CONNECTION_REFUSED.
+  // When no custom relay is configured, auto-try the local relay ports when
+  // the page is served from a "local" origin:
+  //   localhost / 127.0.0.1  — classic dev
+  //   *.local               — mDNS hostnames (e.g. local-ai-home.local)
+  // On a bare LAN IP (192.168.x.x) we skip — those fetches always refuse.
   if (!hasCustomRelay && typeof window !== 'undefined') {
     const host    = window.location.hostname
-    const isLocal = host === 'localhost' || host === '127.0.0.1'
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')
     if (isLocal) {
-      candidates.push('http://localhost:4010/api/info')
-      candidates.push('http://localhost:3000/api/info')
+      // Use the page hostname so local-ai-home.local:4010 is tried directly
+      candidates.push(`http://${host}:4010/api/info`)
+      candidates.push(`http://${host}:3000/api/info`)
+      // Also try plain localhost in case the relay only binds there
+      if (host !== 'localhost') {
+        candidates.push('http://localhost:4010/api/info')
+        candidates.push('http://localhost:3000/api/info')
+      }
     }
   }
 
