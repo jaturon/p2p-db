@@ -164,13 +164,19 @@ function updateRelayAddr() {
 // Poll every 3 s as a fallback in case self:peer:update doesn't fire
 setInterval(updateRelayAddr, 3000)
 
-// Pre-fill relay input from ?relay= URL param
+// Pre-fill relay input from ?relay= URL param.
+// Only accept http/https URLs — reject libp2p multiaddrs (/ip4/…, /dns4/…)
+// which were sometimes accidentally pasted into the field.
 const relayParam = new URLSearchParams(location.search).get('relay')
-if (relayParam) $('relay-url').value = relayParam
+if (relayParam && /^https?:\/\//.test(relayParam)) $('relay-url').value = relayParam
 
 $('relay-connect-btn').addEventListener('click', async () => {
   const url = $('relay-url').value.trim()
   if (!url) return
+  if (!/^https?:\/\//.test(url)) {
+    log('Relay URL must start with http:// or https:// — e.g. http://192.168.1.160:4010', 'err')
+    return
+  }
   const btn = $('relay-connect-btn')
   btn.textContent = 'connecting…'
   btn.disabled = true

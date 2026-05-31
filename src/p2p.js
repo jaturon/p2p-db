@@ -48,19 +48,26 @@ function buildRelayCandidates() {
 }
 
 async function discoverGateway(extraUrls = []) {
-  for (const url of [...extraUrls, ...buildRelayCandidates()]) {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
-      if (!res.ok) continue
-      const info = await res.json()
-      const addrs = info.addrs ?? []
-      // Accept any WebSocket address (ws or wss); prefer non-loopback
-      const ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
-               ?? addrs.find(a => a.includes('/ws'))
-      if (ws) return { addr: ws, peerId: info.peer_id }
-    } catch { /* try next */ }
+  const candidates = [...new Set([...extraUrls, ...buildRelayCandidates()])]
+
+  // Race all candidates in parallel so we don't waste seconds timing out on
+  // each URL in sequence (e.g. port 3000 before 4010).
+  const tryUrl = async url => {
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) throw new Error(`${res.status}`)
+    const info = await res.json()
+    const addrs = info.addrs ?? []
+    const ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
+             ?? addrs.find(a => a.includes('/ws'))
+    if (!ws) throw new Error('no ws addr')
+    return { addr: ws, peerId: info.peer_id }
   }
-  return null
+
+  try {
+    return await Promise.any(candidates.map(tryUrl))
+  } catch {
+    return null
+  }
 }
 
 const enc = new TextEncoder()

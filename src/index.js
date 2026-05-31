@@ -41,6 +41,11 @@ export async function createP2PDB(opts = {}) {
       } else if (msg?.__type === 'db:delete') {
         await db._applyDelete(msg.key, true, from)
         onSync?.('delete', msg.key)
+      } else if (msg?.__type === 'db:sync-request') {
+        // A newly joined peer asked for our full state. Broadcast everything we have.
+        for (const { key, value } of db.all()) {
+          node.send({ __type: 'db:set', key, value }).catch(() => {})
+        }
       } else {
         onMessage?.(from, msg)
       }
@@ -62,6 +67,27 @@ export async function createP2PDB(opts = {}) {
     node.send({ __type: 'db:delete', key }).catch(() => {})
     return db
   }
+
+  // Broadcast a db:sync-request so peers with existing state will replay
+  // their records to us.  Two triggers:
+  //
+  // 1. Startup timer (2 s) — handles the initial relay connection which fires
+  //    peer:connect *inside* P2PNode.create(), before our listener is attached.
+  //
+  // 2. peer:connect listener — handles peers that connect *after* startup
+  //    (e.g. a second browser opening later). Throttled to once per 10 s.
+  const sendSyncRequest = () =>
+    setTimeout(() => node.send({ __type: 'db:sync-request' }).catch(() => {}), 1500)
+
+  setTimeout(() => node.send({ __type: 'db:sync-request' }).catch(() => {}), 2000)
+
+  let lastSyncRequest = Date.now()
+  node.on('peer:connect', () => {
+    const now = Date.now()
+    if (now - lastSyncRequest < 10_000) return
+    lastSyncRequest = now
+    sendSyncRequest()
+  })
 
   return { db, node }
 }
