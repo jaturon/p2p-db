@@ -31,7 +31,11 @@ function buildRelayCandidates() {
   if (typeof window !== 'undefined') {
     const relayParam = new URLSearchParams(window.location.search).get('relay')
     if (relayParam) {
-      candidates.push(`${relayParam.replace(/\/$/, '')}/api/info`)
+      // Comma-separated list: ?relay=http://r1.fly.dev,http://r2.fly.dev
+      for (const u of relayParam.split(',')) {
+        const t = u.trim()
+        if (t) candidates.push(`${t.replace(/\/$/, '')}/api/info`)
+      }
     }
   }
 
@@ -47,27 +51,33 @@ function buildRelayCandidates() {
   return candidates
 }
 
-async function discoverGateway(extraUrls = []) {
+// Try a single /api/info URL; throws on any failure.
+async function tryRelayUrl(url) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
+  if (!res.ok) throw new Error(`${res.status}`)
+  const info = await res.json()
+  const addrs = info.addrs ?? []
+  const ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
+           ?? addrs.find(a => a.includes('/ws'))
+  if (!ws) throw new Error('no ws addr')
+  return { addr: ws, peerId: info.peer_id }
+}
+
+// Discover ALL reachable relays in parallel.
+// Returns an array (possibly empty) deduplicated by peer ID.
+async function discoverGateways(extraUrls = []) {
   const candidates = [...new Set([...extraUrls, ...buildRelayCandidates()])]
+  const results = await Promise.allSettled(candidates.map(tryRelayUrl))
+  const seen = new Set()
+  return results
+    .filter(r => r.status === 'fulfilled')
+    .map(r => r.value)
+    .filter(g => { if (seen.has(g.peerId)) return false; seen.add(g.peerId); return true })
+}
 
-  // Race all candidates in parallel so we don't waste seconds timing out on
-  // each URL in sequence (e.g. port 3000 before 4010).
-  const tryUrl = async url => {
-    const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
-    if (!res.ok) throw new Error(`${res.status}`)
-    const info = await res.json()
-    const addrs = info.addrs ?? []
-    const ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
-             ?? addrs.find(a => a.includes('/ws'))
-    if (!ws) throw new Error('no ws addr')
-    return { addr: ws, peerId: info.peer_id }
-  }
-
-  try {
-    return await Promise.any(candidates.map(tryUrl))
-  } catch {
-    return null
-  }
+// Backwards-compat single-result helper used by dialRelay().
+async function discoverGateway(extraUrls = []) {
+  try { return await Promise.any(extraUrls.map(tryRelayUrl)) } catch { return null }
 }
 
 const enc = new TextEncoder()
@@ -94,8 +104,9 @@ export class P2PNode {
       onMessage,
     } = opts
 
-    // Auto-discover the local libp2p_test gateway before creating the node
-    const gateway = await discoverGateway()
+    // Discover all reachable relays before creating the node so we can set
+    // discoverRelays to the right count and dial them all after start().
+    const gateways = await discoverGateways()
 
     const node = await createLibp2p({
       addresses: {
@@ -106,7 +117,10 @@ export class P2PNode {
         // /p2p-circuit, so the WebSocket transport won't try to create a browser
         // server listener when /p2p-circuit is in addresses.listen.
         webSockets({ filter: wsAll }),
-        circuitRelayTransport({ discoverRelays: 1 }),
+        // discoverRelays tells libp2p how many relay reservations to maintain.
+        // More than 1 means the browser keeps a slot at each relay; if one
+        // goes down it stays reachable via the others.
+        circuitRelayTransport({ discoverRelays: Math.max(gateways.length, 3) }),
       ],
       connectionEncrypters: [noise()],
       streamMuxers: [yamux()],
@@ -133,16 +147,19 @@ export class P2PNode {
 
     await node.start()
 
-    // Dial the gateway directly — mirrors browser-client/main.js
-    if (gateway) {
+    // Dial every discovered relay. Each successful dial gives the browser a
+    // circuit relay reservation; if any relay later goes down the others
+    // keep it reachable.
+    if (gateways.length === 0) {
+      console.warn('[p2p] no relay found — running dial-only (no inbound reachability)')
+    }
+    for (const gw of gateways) {
       try {
-        await node.dial(multiaddr(gateway.addr))
-        console.log('[p2p] connected to gateway:', gateway.addr)
+        await node.dial(multiaddr(gw.addr))
+        console.log('[p2p] connected to relay:', gw.addr)
       } catch (err) {
-        console.warn('[p2p] gateway dial failed:', err.message)
+        console.warn('[p2p] relay dial failed:', err.message)
       }
-    } else {
-      console.warn('[p2p] no local gateway found at port 4010')
     }
 
     const p2p = new P2PNode(node, topic)
@@ -201,24 +218,31 @@ export class P2PNode {
   }
 
   /**
-   * Dial a relay by its /api/info URL and make a circuit relay reservation.
-   * Use this after node creation to connect to a relay entered in the UI.
-   * Returns true on success, false if the relay could not be reached.
+   * Dial one or more relays by their /api/info base URLs.
+   * Accepts a comma-separated string or an array.
+   * Returns true if at least one relay connected successfully.
    *
-   * @param {string} relayBaseUrl  e.g. 'https://my-relay.fly.dev'
+   * @param {string|string[]} relayUrls  e.g. 'https://r1.fly.dev,https://r2.fly.dev'
    */
-  async dialRelay(relayBaseUrl) {
-    const apiUrl = `${relayBaseUrl.replace(/\/$/, '')}/api/info`
-    const gateway = await discoverGateway([apiUrl])
-    if (!gateway) return false
-    try {
-      await this._node.dial(multiaddr(gateway.addr))
-      console.log('[p2p] connected to relay:', gateway.addr)
-      return true
-    } catch (err) {
-      console.warn('[p2p] relay dial failed:', err.message)
-      return false
+  async dialRelay(relayUrls) {
+    const urls = (Array.isArray(relayUrls) ? relayUrls : relayUrls.split(','))
+      .map(u => `${u.trim().replace(/\/$/, '')}/api/info`)
+      .filter(Boolean)
+
+    const gateways = await discoverGateways(urls)
+    if (gateways.length === 0) return false
+
+    let anyOk = false
+    for (const gw of gateways) {
+      try {
+        await this._node.dial(multiaddr(gw.addr))
+        console.log('[p2p] connected to relay:', gw.addr)
+        anyOk = true
+      } catch (err) {
+        console.warn('[p2p] relay dial failed:', err.message)
+      }
     }
+    return anyOk
   }
 
   /**

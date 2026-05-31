@@ -147,14 +147,14 @@ node.on('peer:disconnect', peerId => {
 node.on('self:update', updateRelayAddr)
 
 function updateRelayAddr() {
-  const all = node.multiaddrs
   const relays = node.relayMultiaddrs
-  console.debug('[relay] all multiaddrs:', all)
+  console.debug('[relay] all multiaddrs:', node.multiaddrs)
   console.debug('[relay] circuit addrs:', relays)
   const el = $('relay-addr')
   if (relays.length) {
-    el.textContent = relays[0]
-    el.title = 'Click to copy'
+    // Show all circuit relay addresses (one per connected relay)
+    el.textContent = relays.join('\n')
+    el.title = `${relays.length} relay${relays.length > 1 ? 's' : ''} — click to copy first`
   } else {
     el.textContent = 'waiting for relay…'
     el.title = ''
@@ -164,17 +164,19 @@ function updateRelayAddr() {
 // Poll every 3 s as a fallback in case self:peer:update doesn't fire
 setInterval(updateRelayAddr, 3000)
 
-// Pre-fill relay input from ?relay= URL param.
-// Only accept http/https URLs — reject libp2p multiaddrs (/ip4/…, /dns4/…)
-// which were sometimes accidentally pasted into the field.
+// Pre-fill relay input from ?relay= URL param (comma-separated).
+// Only accept http/https URLs — reject libp2p multiaddrs (/ip4/…, /dns4/…).
 const relayParam = new URLSearchParams(location.search).get('relay')
-if (relayParam && /^https?:\/\//.test(relayParam)) $('relay-url').value = relayParam
+if (relayParam && relayParam.split(',').every(u => /^https?:\/\//.test(u.trim()))) {
+  $('relay-url').value = relayParam
+}
 
 $('relay-connect-btn').addEventListener('click', async () => {
   const url = $('relay-url').value.trim()
   if (!url) return
-  if (!/^https?:\/\//.test(url)) {
-    log('Relay URL must start with http:// or https:// — e.g. http://192.168.1.160:4010', 'err')
+  const parts = url.split(',').map(u => u.trim()).filter(Boolean)
+  if (parts.some(u => !/^https?:\/\//.test(u))) {
+    log('Each relay URL must start with http:// or https:// — e.g. http://192.168.1.160:4010', 'err')
     return
   }
   const btn = $('relay-connect-btn')
@@ -185,7 +187,7 @@ $('relay-connect-btn').addEventListener('click', async () => {
   btn.disabled = false
   if (ok) {
     log(`relay connected: ${url}`, 'peer')
-    // Update URL bar so the link is shareable
+    // Update URL bar — keeps all relay URLs so sharing the link reconnects all
     const u = new URL(location.href)
     u.searchParams.set('relay', url)
     history.replaceState(null, '', u.toString())
