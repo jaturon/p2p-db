@@ -25,7 +25,7 @@ const RELAY_PEER_IDS = new Set()
     ? param.split(',').map(u => `${u.trim().replace(/\/$/, '')}/api/info`).filter(Boolean)
     : [
         ...(isLocal ? [`http://${host}:4010/api/info`] : []),
-        'http://202.44.53.64:4010/api/info',  // default public relay
+        'http://202.44.53.65:4010/api/info',  // default public relay
       ]
   for (const url of urls) {
     fetch(url, { signal: AbortSignal.timeout(2000) })

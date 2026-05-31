@@ -66,7 +66,7 @@ function buildRelayCandidates() {
 
   // Default public relay — always tried as a final fallback so any device
   // on any network can sync without manual configuration.
-  candidates.push('http://202.44.53.64:4010/api/info')
+  candidates.push('http://202.44.53.65:4010/api/info')
 
   return candidates
 }
