@@ -44,11 +44,17 @@ function buildRelayCandidates() {
     }
   }
 
-  // No automatic local-port scanning: fetch() failures always appear in the
-  // browser console even with .catch(), so guessing ports produces unavoidable
-  // ERR_CONNECTION_REFUSED noise. Relay connection is always explicit:
-  //   • ?relay=http://localhost:4010  (URL param)
-  //   • sidebar "Connect" button
+  // When no custom relay is configured and the page is on localhost,
+  // auto-try the local relay ports. On a LAN IP (192.168.x.x) we skip
+  // local scanning — those fetches would always fail with ERR_CONNECTION_REFUSED.
+  if (!hasCustomRelay && typeof window !== 'undefined') {
+    const host    = window.location.hostname
+    const isLocal = host === 'localhost' || host === '127.0.0.1'
+    if (isLocal) {
+      candidates.push('http://localhost:4010/api/info')
+      candidates.push('http://localhost:3000/api/info')
+    }
+  }
 
   return candidates
 }
