@@ -28,6 +28,7 @@ import { yamux }                  from '@chainsafe/libp2p-yamux'
 import { identify }               from '@libp2p/identify'
 import { circuitRelayServer }     from '@libp2p/circuit-relay-v2'
 import { gossipsub }              from '@chainsafe/libp2p-gossipsub'
+import { pubsubPeerDiscovery }    from '@libp2p/pubsub-peer-discovery'
 import { generateKeyPair,
          privateKeyToProtobuf,
          privateKeyFromProtobuf } from '@libp2p/crypto/keys'
@@ -42,6 +43,12 @@ const WS_PORT          = parseInt(process.env.WS_PORT          ?? '8080')
 const API_PORT         = parseInt(process.env.API_PORT         ?? '3000')
 const HOSTNAME         = process.env.HOSTNAME                  ?? ''
 const WS_EXTERNAL_PORT = parseInt(process.env.WS_EXTERNAL_PORT ?? '443')
+
+// Comma-separated list of GossipSub topics to subscribe to.
+// The relay joins these topics so it can route messages between browsers
+// that are only connected to the relay and not directly to each other.
+// Must include both the peer-discovery topic and any app topics.
+const TOPICS = (process.env.TOPICS ?? 'p2p-db-notes-v1').split(',').map(t => t.trim()).filter(Boolean)
 
 // Key file: prefer /data/ (Fly.io volume mount) if it exists
 const KEY_FILE = process.env.KEY_FILE ??
@@ -85,6 +92,13 @@ const node = await createLibp2p({
   transports: [webSockets()],
   connectionEncrypters: [noise()],
   streamMuxers: [yamux()],
+  peerDiscovery: [
+    // Subscribe to the peer-discovery GossipSub topic so the relay
+    // participates in the mesh and can forward discovery messages between
+    // browser peers that are only connected through this relay.
+    pubsubPeerDiscovery({ interval: 5_000 }),
+  ],
+
   services: {
     identify: identify(),
 
@@ -97,8 +111,10 @@ const node = await createLibp2p({
       },
     }),
 
-    // GossipSub — routes pubsubPeerDiscovery messages between connected peers
-    // The relay itself does NOT subscribe to any app topics.
+    // GossipSub — the relay subscribes to both peer-discovery and app topics
+    // so it can route messages between browsers that are only connected to
+    // the relay and not directly to each other.  App topics are configured
+    // via the TOPICS env var (default: p2p-db-notes-v1).
     pubsub: gossipsub({
       allowPublishToZeroTopicPeers: true,
       emitSelf: false,
@@ -114,6 +130,13 @@ const node = await createLibp2p({
 })
 
 await node.start()
+
+// Subscribe to all configured topics so the relay can route messages
+// between browsers that only share the relay as a mutual peer.
+for (const topic of TOPICS) {
+  node.services.pubsub.subscribe(topic)
+  console.log('Subscribed to topic:', topic)
+}
 
 const peerId = node.peerId.toString()
 console.log('\nRelay peer ID:', peerId)
