@@ -13,11 +13,21 @@ let searchText   = ''     // live text filter from search-input
 let sortOrder    = 'newest'  // 'newest' | 'oldest'
 let editingKey   = null   // primary key of note being edited inline, or null
 
-// Fetch gateway peer ID for sidebar labelling (fire-and-forget; filled in async)
+// Fetch relay peer IDs for sidebar labelling.
+// Tries the configured ?relay= URLs first; falls back to local port 4010.
+// All fetches are fire-and-forget so failures don't block startup.
 const RELAY_PEER_IDS = new Set()
-fetch(`http://${location.hostname}:4010/api/info`, { signal: AbortSignal.timeout(2000) })
-  .then(r => r.json()).then(info => { if (info.peer_id) RELAY_PEER_IDS.add(info.peer_id) })
-  .catch(() => {})
+{
+  const param = new URLSearchParams(location.search).get('relay')
+  const urls = param
+    ? param.split(',').map(u => `${u.trim().replace(/\/$/, '')}/api/info`).filter(Boolean)
+    : [`http://${location.hostname}:4010/api/info`, 'http://localhost:4010/api/info']
+  for (const url of urls) {
+    fetch(url, { signal: AbortSignal.timeout(2000) })
+      .then(r => r.json()).then(info => { if (info.peer_id) RELAY_PEER_IDS.add(info.peer_id) })
+      .catch(() => {})
+  }
+}
 
 function log(msg, type = 'info') {
   const el = document.createElement('div')

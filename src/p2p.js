@@ -30,10 +30,12 @@ export const BOOTSTRAP_LIST = [] // kept for API compatibility
 // without changing any source files — just change the URL.
 function buildRelayCandidates() {
   const candidates = []
+  let hasCustomRelay = false
 
   if (typeof window !== 'undefined') {
     const relayParam = new URLSearchParams(window.location.search).get('relay')
     if (relayParam) {
+      hasCustomRelay = true
       // Comma-separated list: ?relay=http://r1.fly.dev,http://r2.fly.dev
       for (const u of relayParam.split(',')) {
         const t = u.trim()
@@ -42,14 +44,17 @@ function buildRelayCandidates() {
     }
   }
 
-  // Local relay/gateway (dev) — try both the p2p-db relay default (3000)
-  // and the legacy libp2p_test gateway port (4010)
-  const host  = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-  const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:'
-  candidates.push(`${proto}//${host}:3000/api/info`)
-  candidates.push('http://localhost:3000/api/info')
-  candidates.push(`${proto}//${host}:4010/api/info`)
-  candidates.push('http://localhost:4010/api/info')
+  // Only add local fallback candidates when no custom relay is configured.
+  // When ?relay= is set and working, trying localhost:4010 just produces
+  // ERR_CONNECTION_REFUSED noise in the browser console.
+  if (!hasCustomRelay) {
+    const host  = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+    const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:'
+    candidates.push(`${proto}//${host}:3000/api/info`)
+    candidates.push('http://localhost:3000/api/info')
+    candidates.push(`${proto}//${host}:4010/api/info`)
+    candidates.push('http://localhost:4010/api/info')
+  }
 
   return candidates
 }
