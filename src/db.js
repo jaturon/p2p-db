@@ -285,6 +285,38 @@ export class DBIndex {
     return rows?.length ? rows[0][0] : null
   }
 
+  /**
+   * tables() → string[]
+   * All table names in the database.
+   * For p2p-db there is always at least 'kv'; you may have added others.
+   */
+  async tables() {
+    const rows = await this.sql(
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    )
+    return (rows ?? []).map(r => r[0])
+  }
+
+  /**
+   * schema(tableName?) → string | { [table]: string }
+   * Returns the CREATE TABLE SQL for one table, or an object mapping every
+   * table name to its CREATE TABLE SQL when called with no argument.
+   *
+   *   await db.schema()         // { kv: 'CREATE TABLE kv (…)' }
+   *   await db.schema('kv')     // 'CREATE TABLE kv (key TEXT PRIMARY KEY …)'
+   */
+  async schema(tableName) {
+    const rows = await this.sql(
+      `SELECT name, sql FROM sqlite_master WHERE type='table'${
+        tableName ? ' AND name=?' : ' ORDER BY name'
+      }`,
+      tableName ? [tableName] : []
+    )
+    if (!rows?.length) return tableName ? null : {}
+    if (tableName) return rows[0][1]
+    return Object.fromEntries(rows.map(([n, s]) => [n, s]))
+  }
+
   on(event, handler) {
     this._emitter.addEventListener(event, e => handler(e.detail))
     return this
