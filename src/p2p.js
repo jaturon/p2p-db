@@ -80,8 +80,28 @@ async function tryRelayUrl(url) {
   if (!res.ok) throw new Error(`${res.status}`)
   const info = await res.json()
   const addrs = info.addrs ?? []
-  const ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
-           ?? addrs.find(a => a.includes('/ws'))
+
+  // When the browser itself is on localhost/127.0.0.1/*.local, prefer the
+  // loopback address so we dial ws://127.0.0.1:port instead of the LAN IP.
+  // The LAN IP still works, but loopback is more reliable and avoids
+  // spurious "can't establish connection" warnings in Firefox when the relay
+  // is briefly unreachable from the external interface.
+  const onLocalhost = typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+     window.location.hostname === '127.0.0.1' ||
+     window.location.hostname.endsWith('.local'))
+
+  let ws
+  if (onLocalhost) {
+    // Prefer loopback for localhost browsers, then any WS
+    ws = addrs.find(a => a.includes('/ws') && a.includes('127.0.0.1'))
+      ?? addrs.find(a => a.includes('/ws'))
+  } else {
+    // For remote browsers, prefer non-loopback non-docker-bridge addresses
+    ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
+      ?? addrs.find(a => a.includes('/ws'))
+  }
+
   if (!ws) throw new Error('no ws addr')
   return { addr: ws, peerId: info.peer_id }
 }
@@ -216,6 +236,20 @@ export class P2PNode {
 
     node.addEventListener('peer:disconnect', evt => {
       p2p._dispatch('peer:disconnect', evt.detail.toString())
+      // If a relay disconnects and we now have fewer peers than we started with,
+      // re-discover and re-dial all configured relays after a short delay.
+      // This makes the browser automatically reconnect to the default relay
+      // (202.44.53.65) when the local relay dies.
+      setTimeout(async () => {
+        if (node.getPeers().length < gateways.length) {
+          const fresh = await discoverGateways()
+          for (const gw of fresh) {
+            if (!node.getPeers().some(p => p.toString() === gw.peerId)) {
+              node.dial(multiaddr(gw.addr)).catch(() => {})
+            }
+          }
+        }
+      }, 3000)
     })
 
     // Fires when the node's multiaddrs change — e.g. when a circuit relay
