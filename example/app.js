@@ -14,16 +14,16 @@ let sortOrder    = 'newest'  // 'newest' | 'oldest'
 let editingKey   = null   // primary key of note being edited inline, or null
 
 // Fetch relay peer IDs for sidebar labelling (fire-and-forget).
-// With ?relay=: tries those URLs only.
-// Without ?relay= on localhost: tries localhost:4010 (dev mode).
-// Without ?relay= on a LAN IP: skips — would only produce ERR_CONNECTION_REFUSED.
+// Only fetches from explicitly configured relay URLs (?relay= param).
+// No automatic localhost scanning — fetch() errors always appear in the
+// browser console even with .catch(), so guessing ports causes unavoidable
+// ERR_CONNECTION_REFUSED noise.
 const RELAY_PEER_IDS = new Set()
 {
-  const param   = new URLSearchParams(location.search).get('relay')
-  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-  const urls = param
+  const param = new URLSearchParams(location.search).get('relay')
+  const urls  = param
     ? param.split(',').map(u => `${u.trim().replace(/\/$/, '')}/api/info`).filter(Boolean)
-    : isLocal ? ['http://localhost:4010/api/info'] : []
+    : []
   for (const url of urls) {
     fetch(url, { signal: AbortSignal.timeout(2000) })
       .then(r => r.json()).then(info => { if (info.peer_id) RELAY_PEER_IDS.add(info.peer_id) })
