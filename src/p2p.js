@@ -64,8 +64,15 @@ function buildRelayCandidates() {
     }
   }
 
+  // Default public relay — always tried as a final fallback so any device
+  // on any network can sync without manual configuration.
+  candidates.push('http://202.44.53.64:4010/api/info')
+
   return candidates
 }
+
+// Maximum number of relay slots the browser will maintain simultaneously.
+const MAX_RELAYS = 3
 
 // Try a single /api/info URL; throws on any failure.
 async function tryRelayUrl(url) {
@@ -143,7 +150,7 @@ export class P2PNode {
         // discoverRelays tells libp2p how many relay reservations to maintain.
         // More than 1 means the browser keeps a slot at each relay; if one
         // goes down it stays reachable via the others.
-        circuitRelayTransport({ discoverRelays: Math.max(gateways.length, 3) }),
+        circuitRelayTransport({ discoverRelays: MAX_RELAYS }),
       ],
       connectionEncrypters: [noise()],
       streamMuxers: [yamux()],
