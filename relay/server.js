@@ -54,6 +54,13 @@ const WS_EXTERNAL_PORT = parseInt(process.env.WS_EXTERNAL_PORT ?? '443')
 const TOPICS = (process.env.TOPICS ?? 'p2p-db-notes-v1,_peer-discovery._p2p._pubsub')
   .split(',').map(t => t.trim()).filter(Boolean)
 
+// Comma-separated multiaddrs of peer relays to connect to on startup.
+// e.g. PEER_RELAYS=/ip4/202.44.53.65/tcp/4012/ws/p2p/12D3KooW...
+// Connected relays form a GossipSub mesh so browsers on different relays
+// can sync with each other transparently.
+const PEER_RELAYS = (process.env.PEER_RELAYS ?? '')
+  .split(',').map(s => s.trim()).filter(Boolean)
+
 // Key file: prefer /data/ (Fly.io volume mount) if it exists
 const KEY_FILE = process.env.KEY_FILE ??
   (existsSync('/data') ? '/data/relay.key' : './relay.key')
@@ -148,6 +155,40 @@ console.log('Listening on:')
 for (const ma of node.getMultiaddrs()) console.log(' ', ma.toString())
 console.log()
 
+// ── Relay cluster: connect to peer relays ─────────────────────────────────────
+// Dialing a peer relay causes them to form a GossipSub mesh together.
+// Messages published on any topic then propagate across all connected relays,
+// so browsers on different relays sync transparently.
+// Auto-reconnects every 30 s if a peer relay goes down.
+
+async function dialPeerRelay(addr) {
+  const { multiaddr: ma } = await import('@multiformats/multiaddr')
+  try {
+    await node.dial(ma(addr))
+    console.log('[cluster] connected to peer relay:', addr)
+  } catch (err) {
+    console.warn('[cluster] could not reach peer relay:', addr, '—', err.message)
+  }
+}
+
+if (PEER_RELAYS.length > 0) {
+  console.log(`Connecting to ${PEER_RELAYS.length} peer relay(s)…`)
+  for (const addr of PEER_RELAYS) await dialPeerRelay(addr)
+
+  // Reconnect loop — if a peer relay restarts, reconnect automatically
+  setInterval(async () => {
+    const connected = new Set(node.getPeers().map(p => p.toString()))
+    for (const addr of PEER_RELAYS) {
+      // Extract peer ID from multiaddr /p2p/<ID>
+      const peerIdMatch = addr.match(/\/p2p\/([A-Za-z0-9]+)$/)
+      if (peerIdMatch && !connected.has(peerIdMatch[1])) {
+        console.log('[cluster] reconnecting to', addr)
+        await dialPeerRelay(addr)
+      }
+    }
+  }, 30_000)
+}
+
 // ── HTTP API ──────────────────────────────────────────────────────────────────
 // /api/info  — JSON { peer_id, addrs }; browser fetches this to get the WS addr
 // /healthz   — 200 OK for Fly.io health checks
@@ -158,7 +199,12 @@ const apiServer = createServer((req, res) => {
   if (req.url === '/api/info') {
     const addrs = node.getMultiaddrs().map(a => a.toString())
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ peer_id: peerId, addrs }))
+    res.end(JSON.stringify({
+      peer_id: peerId,
+      addrs,
+      // Expose peer relays so browsers can connect to the full cluster
+      peers: PEER_RELAYS,
+    }))
     return
   }
 
