@@ -22,13 +22,19 @@ export const DEFAULT_RELAY = DEFAULT_RELAYS[0]
 // document.currentScript.src is only valid synchronously while this classic
 // script is executing — capture it now so wa-sqlite.wasm and db-worker.js
 // can be located next to dist/p2p-db.js regardless of the page's own URL.
+//
+// In the standalone HTML build the bundle is inlined into a <script> with no
+// `src`, so document.currentScript.src is "" — fall back to document.baseURI
+// (the page's own URL), since build.js places wa-sqlite.wasm and
+// db-worker.js next to dist/p2p-db.standalone.html.
 const _scriptUrl = (typeof document !== 'undefined' && document.currentScript?.src) || null
+const _wasmBase  = _scriptUrl || (typeof document !== 'undefined' ? document.baseURI : null)
 
-if (_scriptUrl) setWasmBaseUrl(_scriptUrl)
+if (_wasmBase) setWasmBaseUrl(_wasmBase)
 
 // Mode B (durable IndexedDB storage) worker — opt-in via:
 //   createP2PDB({ workerUrl: P2PDB.DB_WORKER_URL })
 // Requires http(s) serving (Worker + wasm fetch are blocked under file://).
-export const DB_WORKER_URL = _scriptUrl
-  ? new URL('./db-worker.js', _scriptUrl).href
+export const DB_WORKER_URL = _wasmBase
+  ? new URL('./db-worker.js', _wasmBase).href
   : './db-worker.js'

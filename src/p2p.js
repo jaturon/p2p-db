@@ -61,15 +61,26 @@ function buildRelayCandidates() {
         candidates.push('http://localhost:4010/api/info')
         candidates.push('http://localhost:3000/api/info')
       }
+    } else {
+      // Page served via a reverse proxy (e.g. https://local-ai-home/...).
+      // Try the same-origin relay proxy first — nginx forwards
+      // /relay/api/info to the local relay's HTTP API, so this works over
+      // HTTPS without tripping mixed-content blocks.
+      candidates.push(`${window.location.origin}/relay/api/info`)
     }
   }
 
-  // Default public relays — always tried as a final fallback so any device
-  // on any network can sync without manual configuration. Both relays are
-  // peered with each other (PEER_RELAYS mesh), so connecting to either is
-  // enough, but trying both gives redundancy if one is down.
-  candidates.push('http://202.44.53.65:4010/api/info')
-  candidates.push('http://199.241.138.174:4010/api/info')
+  // Default public relays — tried as a final fallback so any device on any
+  // network can sync without manual configuration. Both relays are peered
+  // with each other (PEER_RELAYS mesh), so connecting to either is enough,
+  // but trying both gives redundancy if one is down. Skip them on HTTPS
+  // pages: browsers block fetches to plain http:// as mixed content, so
+  // they'd only fail (and spam the console) without a wss-capable relay.
+  const pageIsHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+  if (!pageIsHttps) {
+    candidates.push('http://202.44.53.65:4010/api/info')
+    candidates.push('http://199.241.138.174:4010/api/info')
+  }
 
   return candidates
 }
@@ -94,15 +105,24 @@ async function tryRelayUrl(url) {
      window.location.hostname === '127.0.0.1' ||
      window.location.hostname.endsWith('.local'))
 
+  // On an https:// page, a plain ws:// dial is blocked as mixed content —
+  // only a /wss (TLS-terminated) address will work, so prefer that first.
+  const pageIsHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+
   let ws
-  if (onLocalhost) {
-    // Prefer loopback for localhost browsers, then any WS
-    ws = addrs.find(a => a.includes('/ws') && a.includes('127.0.0.1'))
-      ?? addrs.find(a => a.includes('/ws'))
-  } else {
-    // For remote browsers, prefer non-loopback non-docker-bridge addresses
-    ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
-      ?? addrs.find(a => a.includes('/ws'))
+  if (pageIsHttps) {
+    ws = addrs.find(a => a.includes('/wss'))
+  }
+  if (!ws) {
+    if (onLocalhost) {
+      // Prefer loopback for localhost browsers, then any WS
+      ws = addrs.find(a => a.includes('/ws') && a.includes('127.0.0.1'))
+        ?? addrs.find(a => a.includes('/ws'))
+    } else {
+      // For remote browsers, prefer non-loopback non-docker-bridge addresses
+      ws = addrs.find(a => a.includes('/ws') && !a.includes('127.0.0.1') && !a.includes('172.'))
+        ?? addrs.find(a => a.includes('/ws'))
+    }
   }
 
   if (!ws) throw new Error('no ws addr')
