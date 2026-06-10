@@ -34,7 +34,7 @@ function renderPeers(node) {
 
 ;(async () => {
   const { db, node } = await P2PDB.connect({
-    name: 'p2p-db-standalone',
+    name: 'pqsDB',
     // The public relays (202.44.53.65 / 199.241.138.174) only route the
     // 'p2p-db-notes-v1' topic. To use your own topic, run your own relay
     // (see ../relay/) with TOPICS=your-topic,_peer-discovery._p2p._pubsub
@@ -74,4 +74,35 @@ function renderPeers(node) {
     const ok = await node.dialRelay(url)
     log(ok ? `connected to relay ${url}` : `failed to connect ${url}`, ok ? 'peer' : 'err')
   }
+
+  $('sql-run').onclick = () => runSQL(db)
+  $('sql-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runSQL(db) }
+  })
 })().catch(err => log(`init error: ${err.message}`, 'err'))
+
+// db.sql() runs against the local SQLite (Mode A/B). Returns null if SQLite
+// is unavailable (e.g. file:// — wa-sqlite.wasm can't be fetched), in which
+// case the kv store is still readable via db.all() but not via SQL.
+async function runSQL(db) {
+  const query = $('sql-input').value.trim()
+  if (!query) return
+
+  const out = $('sql-output')
+  out.textContent = 'running…'
+
+  try {
+    const rows = await db.sql(query)
+    if (rows === null) {
+      out.textContent = 'SQLite not available in this environment (e.g. file:// — falling back to localStorage only).'
+      return
+    }
+    if (!rows.length) {
+      out.textContent = '(no rows)'
+      return
+    }
+    out.textContent = rows.map(r => JSON.stringify(r)).join('\n')
+  } catch (err) {
+    out.textContent = `Error: ${err.message}`
+  }
+}
