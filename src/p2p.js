@@ -64,9 +64,12 @@ function buildRelayCandidates() {
     }
   }
 
-  // Default public relay — always tried as a final fallback so any device
-  // on any network can sync without manual configuration.
+  // Default public relays — always tried as a final fallback so any device
+  // on any network can sync without manual configuration. Both relays are
+  // peered with each other (PEER_RELAYS mesh), so connecting to either is
+  // enough, but trying both gives redundancy if one is down.
   candidates.push('http://202.44.53.65:4010/api/info')
+  candidates.push('http://199.241.138.174:4010/api/info')
 
   return candidates
 }

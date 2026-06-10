@@ -25,7 +25,28 @@ import { IDBStorage } from './idb-storage.js'
 
 // Convenience URL for the bundled worker — avoids hard-coding paths.
 // Works in non-bundled ESM. For Vite/webpack use the ?worker or url import.
-export const DB_WORKER_URL = new URL('./db-worker.js', import.meta.url)
+// In bundled (iife) builds import.meta.url is empty, which would make
+// `new URL('./db-worker.js', '')` throw at module-init time — fall back to
+// a plain relative path string in that case (resolved by standalone.js).
+export const DB_WORKER_URL = (() => {
+  try { return new URL('./db-worker.js', import.meta.url) }
+  catch { return './db-worker.js' }
+})()
+
+// Base URL used to locate wa-sqlite.wasm (Mode A). Defaults to
+// import.meta.url (same directory as this module) for plain ESM usage.
+// The standalone bundle overrides this via setWasmBaseUrl() since
+// import.meta.url is empty in iife output.
+let _wasmBaseUrl = import.meta.url || null
+
+export function setWasmBaseUrl(url) {
+  _wasmBaseUrl = url
+}
+
+function sqliteFactoryOptions() {
+  if (!_wasmBaseUrl) return undefined
+  return { locateFile: (path) => new URL(path, _wasmBaseUrl).href }
+}
 
 // ── in-memory SQLite helpers (Mode A only) ────────────────────────────────────
 
@@ -558,7 +579,7 @@ export class DBIndex {
 
   async _initMemory() {
     try {
-      const module = await SQLiteESMFactory()
+      const module = await SQLiteESMFactory(sqliteFactoryOptions())
       this._sqlite3 = SQLite.Factory(module)
       this._db = await this._sqlite3.open_v2(':memory:')
       await this._sqlite3.exec(this._db, `
@@ -608,7 +629,7 @@ export class DBIndex {
     this._idb = null
     if (!this._db) {
       try {
-        const module = await SQLiteESMFactory()
+        const module = await SQLiteESMFactory(sqliteFactoryOptions())
         this._sqlite3 = SQLite.Factory(module)
         this._db = await this._sqlite3.open_v2(':memory:')
         await this._sqlite3.exec(this._db, `

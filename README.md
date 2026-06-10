@@ -33,6 +33,80 @@ node example/server.js 8099
 
 Open the URL in two browser tabs — notes written in one appear in the other in real time.
 
+## Standalone bundle (single `<script>`, no importmap)
+
+For dropping into any HTML page — served from a generic web server, or
+opened directly as a `file://` page — build the single-file bundle:
+
+```bash
+npm install
+npm run build      # → dist/p2p-db.js, dist/p2p-db.standalone.html,
+                   #   dist/wa-sqlite.wasm, dist/db-worker.js
+```
+
+Then include it as a plain classic script (no `type="module"`, no importmap):
+
+```html
+<script src="dist/p2p-db.js"></script>
+<script>
+  (async () => {
+    const { db, node } = await P2PDB.connect({
+      name:  'my-app',
+      // The public relays only route the 'p2p-db-notes-v1' topic — see
+      // "Relay" below if you want your own topic.
+      topic: 'p2p-db-notes-v1',
+    })
+
+    console.log('peer id:', node.peerId)
+    await db.set('hello', { from: node.peerId, ts: Date.now() })
+    db.on('change', e => console.log('change', e))
+  })()
+</script>
+```
+
+`P2PDB` exposes `connect` (alias for `createP2PDB`), `createP2PDB`, `DBIndex`,
+`P2PNode`, `IDBStorage`, `BOOTSTRAP_LIST`, `DB_WORKER_URL`, `DEFAULT_RELAY`
+and `DEFAULT_RELAYS` (`['http://202.44.53.65:4010', 'http://199.241.138.174:4010']`
+— both relays are peered with each other, so connecting to either reaches
+the same network).
+
+A full working example is in `standalone/` (`index.html` + `app.js`). It
+loads `dist/p2p-db.js` via `<script src="...">`, so **serve it over
+http(s)**:
+
+```bash
+npm run build
+python3 -m http.server 8123
+# → open http://localhost:8123/standalone/
+```
+
+### Opening directly from disk (`file://`, double-click)
+
+Open `dist/p2p-db.standalone.html` directly in a browser — no server, no
+flags. It's the same demo as `standalone/`, but built with the `P2PDB`
+bundle and the app code inlined into a single `.html` file.
+
+> Browsers (Firefox especially) block `<script src="...">` references to
+> sibling files when a page is opened via `file://` — every `file://`
+> document is treated as a unique security origin, so the multi-file
+> `standalone/` example (and any multi-file setup of your own) only works
+> when served over http(s). For the double-click case, inline everything
+> into one `.html` file the way `dist/p2p-db.standalone.html` does.
+
+What works when opened as `file://`:
+
+- **P2P / relay connection works** — WebSocket connections aren't subject to
+  the `file://` CORS restrictions, so `node.peers` and GossipSub sync work
+  normally.
+- **`db.get/set/delete/all/find/index/watch/export/import` work** — the
+  localStorage-backed Map store doesn't need to fetch anything.
+- **`db.sql()` / `db.sqlAll()` etc. are unavailable** — browsers block
+  `fetch()` of `file://` resources, so `wa-sqlite.wasm` can't load. `DBIndex`
+  detects this and falls back to memory-only + localStorage automatically
+  (logged as a warning, not an error).
+- **Mode B (`workerUrl: P2PDB.DB_WORKER_URL`, durable IndexedDB)** requires
+  http(s) serving — module Workers and wasm fetches don't work under `file://`.
+
 ## Library API
 
 ```js
@@ -220,7 +294,8 @@ The relay is a minimal libp2p node that:
 1. Accepts WebSocket connections from browsers
 2. Makes circuit relay v2 reservations so browsers get a public address
 3. Subscribes to the app's GossipSub topic and routes messages between peers
-4. Default public relay: `http://202.44.53.65:4010` (auto-used as fallback)
+4. Default public relays: `http://202.44.53.65:4010` and `http://199.241.138.174:4010`
+   (peered with each other, auto-used as fallback)
 
 ### Run locally
 
@@ -259,10 +334,25 @@ fly deploy
 ```
 src/
   index.js          — createP2PDB() + re-exports
+  standalone.js     — entry point for the bundled dist/p2p-db.js build
   db.js             — DBIndex class (storage + indexes + SQL helpers)
   db-worker.js      — Web Worker: SQLite engine + IDBBatchAtomicVFS
   idb-storage.js    — Main-thread proxy for db-worker (postMessage RPC)
   p2p.js            — P2PNode class (libp2p v2 + GossipSub)
+
+build.js            — esbuild config; `npm run build` → dist/
+
+dist/               — built by `npm run build` (gitignored)
+  p2p-db.js         — single-file IIFE bundle, global `P2PDB`
+  p2p-db.standalone.html — standalone/ demo with bundle + app inlined,
+                           opens directly via file:// (no server, no flags)
+  wa-sqlite.wasm    — copied next to p2p-db.js (Mode A SQL)
+  db-worker.js      — copied as-is (Mode B, opt-in)
+
+standalone/
+  index.html        — <script src="../dist/p2p-db.js"> example, no importmap
+                       (requires http(s) serving — see file:// section above)
+  app.js            — same notes-app walkthrough using the global P2PDB
 
 example/
   index.html        — importmap + styles

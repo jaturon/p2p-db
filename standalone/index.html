@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>p2p-db — standalone</title>
+  <link rel="icon" href="data:,">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; font-size: 14px; background: #0d0d0d; color: #e0e0e0;
+           max-width: 720px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 16px; margin-bottom: 12px; }
+    .row { display: flex; gap: 8px; margin-bottom: 10px; }
+    input, button { font: inherit; background: #1e1e1e; border: 1px solid #333;
+                    color: #e0e0e0; padding: 6px 10px; border-radius: 4px; }
+    input { flex: 1; }
+    button { cursor: pointer; background: #1a3060; border-color: #2a4a8a; color: #7af; }
+    button:hover { background: #233880; }
+    .info-block { margin-bottom: 10px; font-size: 12px; color: #8ec; word-break: break-all; }
+    .info-block b { color: #888; font-weight: normal; }
+    #notes { list-style: none; }
+    #notes li { padding: 6px 8px; border-bottom: 1px solid #222; display: flex;
+                justify-content: space-between; gap: 8px; }
+    #notes li.remote { color: #4a4; }
+    #notes li button { padding: 2px 8px; font-size: 11px; }
+    #log { margin-top: 12px; font-size: 11px; color: #666; height: 120px;
+           overflow-y: auto; border-top: 1px solid #222; padding-top: 6px; }
+    .log-line.peer   { color: #a84; }
+    .log-line.remote { color: #4a4; }
+    .log-line.err    { color: #c44; }
+  </style>
+</head>
+<body>
+  <h1>p2p-db — standalone (single &lt;script&gt; bundle)</h1>
+
+  <div class="info-block"><b>peer id:</b> <span id="peer-id">starting…</span></div>
+  <div class="info-block"><b>storage:</b> <span id="storage-mode">…</span></div>
+  <div class="info-block"><b>peers (<span id="peer-count">0</span>):</b> <span id="peers"></span></div>
+
+  <div class="row">
+    <input id="relay-url" placeholder="custom relay http://host:4010 (optional)">
+    <button id="relay-connect">Connect relay</button>
+  </div>
+
+  <div class="row">
+    <input id="note-input" placeholder="note text…" maxlength="200">
+    <button id="add-btn">+ Add</button>
+  </div>
+
+  <ul id="notes"></ul>
+  <div id="log"></div>
+
+  <!-- Single bundled library file — classic script, no importmap needed.
+       Exposes the global `P2PDB` object. -->
+  <script src="../dist/p2p-db.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

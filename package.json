@@ -2,6 +2,9 @@
   "name": "p2p-db",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "build": "node build.js"
+  },
   "exports": {
     ".": "./src/index.js",
     "./db": "./src/db.js",
@@ -10,7 +13,6 @@
     "./db-worker": "./src/db-worker.js"
   },
   "dependencies": {
-    "wa-sqlite": "^0.9.0",
     "@chainsafe/libp2p-gossipsub": "^14.0.0",
     "@chainsafe/libp2p-noise": "^16.0.0",
     "@chainsafe/libp2p-yamux": "^7.0.0",
@@ -20,6 +22,10 @@
     "@libp2p/pubsub-peer-discovery": "^11.0.0",
     "@libp2p/webrtc": "^5.0.0",
     "@libp2p/websockets": "^9.0.0",
-    "libp2p": "^2.0.0"
+    "libp2p": "^2.0.0",
+    "wa-sqlite": "^1.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
   }
 }

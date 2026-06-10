@@ -24,9 +24,14 @@ export class IDBStorage {
    *     new IDBStorage(DB_WORKER_URL)
    */
   constructor(workerUrl) {
-    const url = workerUrl instanceof URL
-      ? workerUrl
-      : new URL(workerUrl, import.meta.url)
+    // import.meta.url is empty in bundled (iife) builds — new URL(rel, '')
+    // would throw, so fall back to using workerUrl as-is (it should already
+    // be an absolute URL or a path resolvable from the page).
+    let url = workerUrl
+    if (!(workerUrl instanceof URL)) {
+      try { url = new URL(workerUrl, import.meta.url) }
+      catch { url = workerUrl }
+    }
 
     this._worker  = new Worker(url, { type: 'module' })
     this._pending = new Map()
